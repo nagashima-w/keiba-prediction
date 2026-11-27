@@ -36,8 +36,8 @@
  * **画面の判定は `currentScreen()`(`app.ts` が渡す)だけを使う**(Issue #191・#238)。ここで `screenOf(route)` を直接呼ばない
  * (閲覧者の `admin-only` の判定を素通りしないため。`test/client-route.test.ts` が `app.ts` とこのファイルを静的に読んで固定する)。
  */
-import { failureMessage, fetchBoard, fetchRaces, fetchRaceStatus, type BoardRow, type FetchLike, type MorningPriorView, type RaceRow } from "./api";
-import { fetchAnalysis, fetchPastAnalyses, type AnalysisDetail, type PastAnalysis } from "./api-analysis";
+import { failureMessage, fetchBoard, fetchRaces, type BoardRow, type FetchLike, type MorningPriorView, type RaceRow } from "./api";
+import { fetchAnalysis, fetchPastAnalyses, fetchRaceStatusWithModel, type AnalysisDetail, type PastAnalysis, type RaceModelBlock } from "./api-analysis";
 import type { AppScreen } from "./admin-only";
 import { createBoardStore, type BoardCompletion, type BoardStore } from "./board-state";
 import { listKey, raceKey } from "./keys";
@@ -107,6 +107,8 @@ export interface RaceData {
 interface RaceStatusEntry {
   readonly rows: readonly BoardRow[];
   readonly prior: MorningPriorView | null;
+  /** 別の Worker の確率の塊(Issue #806)。応答に無い・壊れていれば省略。 */
+  readonly model?: RaceModelBlock;
 }
 
 /** prior の取り直しに失敗したときの注記の前置き(カードは残す)。 */
@@ -205,7 +207,7 @@ export function createRaceData(deps: RaceDataDeps): RaceData {
     const key = raceKey(date, raceId);
     const cached = raceStatuses.get(key);
     // カードの行は最新の板(ポーリング・オーバーレイを反映したもの)から導く。`status?race_id=` の応答は prior と板の初期値。
-    if (cached !== undefined) return { kind: "ready", rows: store.effectiveRows(date) ?? cached.rows, prior: cached.prior, priorNotice: priorNotices.get(key) ?? null };
+    if (cached !== undefined) return { kind: "ready", rows: store.effectiveRows(date) ?? cached.rows, prior: cached.prior, priorNotice: priorNotices.get(key) ?? null, ...(cached.model === undefined ? {} : { model: cached.model }) };
     const error = raceStatusErrors.get(key);
     if (error !== undefined) return { kind: "error", message: error };
     return { kind: "loading" };
@@ -308,10 +310,10 @@ export function createRaceData(deps: RaceDataDeps): RaceData {
   function startStatusFetch(date: string, raceId: string, kind: "open" | "refresh"): void {
     const key = raceKey(date, raceId);
     const seq = store.nextSeq();
-    const promise = fetchRaceStatus(deps.fetch, date, raceId).then((result) => {
+    const promise = fetchRaceStatusWithModel(deps.fetch, date, raceId).then((result) => {
       raceStatusInflight.delete(key);
       if (result.ok) {
-        raceStatuses.set(key, { rows: result.rows, prior: result.prior });
+        raceStatuses.set(key, { rows: result.rows, prior: result.prior, ...(result.model === undefined ? {} : { model: result.model }) });
         raceStatusErrors.delete(key);
         priorNotices.delete(key);
         applyBoard(date, result.rows, seq, raceId);

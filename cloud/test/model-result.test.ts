@@ -3,6 +3,7 @@ import {
   attachCourse,
   attachModel,
   buildModelColumn,
+  modelBlockOf,
   loadModelColumn,
   loadModelResult,
   parseModelCourse,
@@ -623,5 +624,50 @@ describe("コースの参考情報(Issue #802)", () => {
       expect(r!.course).toBeNull();
       expect(r!.column.status).toBe("ok");
     });
+  });
+});
+
+describe("#806 modelBlockOf(レースの画面の状態の応答に足す、検査済みの塊)", () => {
+  const prevBody = () => provBody(
+    [
+      { umaban: 1, p_win: 0.25, odds_win: 8, u_mat: 0.3, course_fit: { same: { runs: 2, wins: 1, top3: 2, best: 1 }, similar: { runs: 0, wins: 0, top3: 0, best: null }, unknown_ring: 0 } },
+      { umaban: 2, p_win: 0.5, odds_win: 3, u_mat: -0.1 },
+    ],
+    { stage: "preday", odds_source: "lead-1", course: { key: "05-T-1600-out", name: "東京 芝1600" } },
+  );
+  const load = async (body: unknown) => {
+    const model = { fetch: async () => new Response(JSON.stringify(body), { status: 200 }) } as unknown as Fetcher;
+    return loadModelResult({ model, readWinOdds: async () => null }, RACE, () => {});
+  };
+
+  it("暫定の確率: 馬ごとの確率・確率×単勝・補助・コース成績と、コース・段階・注記を持つ。値は loadModelResult の列と同じ", async () => {
+    const result = await load(prevBody());
+    const block = modelBlockOf(result);
+    expect(block).not.toBeNull();
+    expect(block!.status).toBe("ok");
+    expect(block!.stage).toBe("preday");
+    expect(block!.note).toBe(result!.column.note);
+    expect(block!.horses.map((h) => h.umaban)).toEqual([1, 2]);
+    expect(block!.horses[0]).toMatchObject({ umaban: 1, prob: 0.25, ev: 2, aux: { value: 0.3, rank: 1, of: 2 } });
+    expect(block!.horses[0]!.courseFit).toEqual(result!.course!.fits.get(1));
+    expect(block!.horses[1]!.courseFit).toBeUndefined();
+    expect(result!.course!.course).not.toBeNull();
+    expect(block!.course).toEqual(result!.course!.course);
+  });
+
+  it("計算なし(none で horses なし): 注記だけ。馬の配列は空・コースは無し", async () => {
+    const result = await load({ race_id: RACE, status: "none", reason: "not_ready" });
+    const block = modelBlockOf(result);
+    expect(block).toEqual({ status: "none", stage: null, note: result!.column.note, horses: [] });
+  });
+
+  it("loadModelResult が null(地方・バインディングなし)なら null。応答が不正で計算なしの列も、全馬 — の表ではなく注記だけ", async () => {
+    expect(modelBlockOf(null)).toBeNull();
+    const bad = await load({ race_id: "別のレース", status: "ok" });
+    const block = modelBlockOf(bad);
+    expect(block).not.toBeNull();
+    expect(block!.status).toBe("none");
+    expect(block!.horses).toEqual([]);
+    expect("course" in block!).toBe(false);
   });
 });

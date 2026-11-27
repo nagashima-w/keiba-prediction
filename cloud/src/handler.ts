@@ -23,7 +23,7 @@ import type { GatePostRequest, GateResult, GateStatus } from "./gate-core";
 import { runJraCheck, type JraFetchLike } from "./jra-check";
 import { runGradeWinnerCheck, runShutubaCheck, validateRaceId, type CheckTarget } from "./netkeiba-check";
 import { attachMarketEdge, loadMarketEdge } from "./analysis-market-edge";
-import { attachCourse, attachModel, loadModelResult } from "./model-result";
+import { attachCourse, attachModel, loadModelResult, modelBlockOf } from "./model-result";
 import { readWinOdds5, type OddsSnapshotReadDb } from "./odds-snapshot-repository";
 import { D1MarketEdgeStore } from "./market-edge-repository";
 import { buildMarketEdgesView } from "./market-edges-view";
@@ -1742,6 +1742,7 @@ async function handlePromptPreview(request: Request): Promise<Response> {
 /**
  * `GET /api/analyses/status?kaisai_date=YYYYMMDD[&race_id=...]`(Issue #180): 日単位の DO の状態。各レースの状態・試行回数・エラー(200 文字まで)・朝の prior の有無。
  * `race_id` を指定すると、そのレースの朝の prior の最小限(レース名・場名・日付・馬番・馬名・prior を高い順に)を `prior` で返す(無ければ null)。
+ * `race_id` つきのときは、別の Worker の確率の塊 `model`(`modelBlockOf`)を足す場合がある(Issue #806。中央・バインディングあり、かつそのレースの発走前の分析が済んでいないとき。呼ぶのは 1 レースにつき 1 回。板だけの取得〈race_id なし〉は呼ばない)。
  * パラメータは kaisai_date(必須)と race_id(任意)を、それぞれ1つまで。不正なら 400(DO を呼ばない)。
  */
 async function handleStatus(url: URL, env: Env): Promise<Response> {
@@ -1802,7 +1803,19 @@ async function handleStatus(url: URL, env: Env): Promise<Response> {
               .sort((a, b) => b.prior - a.prior || a.umaban - b.umaban)
               .map((r, i) => ({ rank: i + 1, umaban: r.umaban, horse_name: r.horseName, prior: r.prior })),
           };
-    return json({ ok: true, kaisai_date: kaisaiDate, races, prior });
+    // 別の Worker の確率の塊(Issue #806)。そのレースの発走前の分析が済んでいれば、詳しい中身の API(`handleAnalysisDetail`)が同じ値を出すので呼ばない(画面も出さない)。
+    // 中央・バインディングあり以外・失敗は、`loadModelResult` が null か注記だけの塊にする(本体は壊さない)。
+    const hasLatestAnalysis = board.races.some((r) => r.raceId === raceId && r.mode === "pre_race" && r.status === "done" && r.analysisId !== null);
+    const model = hasLatestAnalysis
+      ? null
+      : modelBlockOf(
+          await loadModelResult(
+            { model: env.MODEL, readWinOdds: (id) => readWinOdds5(env.DB as unknown as OddsSnapshotReadDb, id) },
+            raceId,
+            (message) => console.warn(message),
+          ),
+        );
+    return json({ ok: true, kaisai_date: kaisaiDate, races, prior, ...(model === null ? {} : { model }) });
   } catch {
     return raceDayError();
   }

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { BoardRow, MorningPriorView, RaceRow } from "../client/api";
-import type { AnalysisDetail } from "../client/api-analysis";
+import type { AnalysisDetail, RaceModelBlock } from "../client/api-analysis";
 import { buildRaceModel, latestAnalysisIdOf, runButtonLabel, type RaceModelInput, type RunUi } from "../client/race";
 import { buildResultModel, NO_ALLOCATION_NOTE, UNSET_ALLOCATION_NOTE, UNSET_ALLOCATION_NOTE_VIEWER } from "../client/result";
 import type { Route } from "../client/route";
@@ -608,5 +608,104 @@ describe("パンくずと前後のレース(Issue #571)", () => {
     expect(admin.neighbors, "前提: 管理者では前後が出る").toBeTruthy();
     expect(viewer.neighbors).toEqual(admin.neighbors);
     expect(viewer.breadcrumb).toEqual(admin.breadcrumb);
+  });
+});
+
+/**
+ * Issue #806: 事前分析のカードの下の「別の Worker の確率」の節(`model.modelSection`)。状態の応答の `model` から作る。
+ * 発走前の分析が済んでいる(詳しい中身が出る)ときは出さない(二重にしない)。朝の prior が無くても出す。計算なしは注記だけ(表を出さない)。
+ */
+describe("modelSection(別の Worker の確率の節)", () => {
+  const FIT = { same: { runs: 2, wins: 1, top3: 2, best: 1 }, similar: { runs: 0, wins: 0, top3: 0, best: null }, unknownRing: 0 };
+  const BLOCK: RaceModelBlock = {
+    status: "ok",
+    stage: "preday",
+    note: "注記の文",
+    horses: [
+      { umaban: 3, prob: 0.25, ev: 2, aux: { value: 0.3, rank: 1, of: 2 }, courseFit: FIT },
+      { umaban: 1, prob: 0.05, ev: null, aux: { value: -0.1, rank: 2, of: 2 } },
+    ],
+    course: { name: "東京 芝1600", similarShape: [{ name: "中山 芝2000", s: 0.5 }], similarResults: null },
+  };
+  const ready = (over: { rows?: BoardRow[]; prior?: MorningPriorView | null; model?: RaceModelBlock | undefined } = {}): RaceModelInput["status"] => ({
+    kind: "ready",
+    rows: over.rows ?? [],
+    prior: over.prior ?? null,
+    ...(over.model === undefined ? {} : { model: over.model }),
+  });
+  const section = (status: RaceModelInput["status"]) => buildRaceModel(input({ status })).modelSection;
+
+  it("model が無ければ null(節ごと出さない)。状態の取得中・失敗も null", () => {
+    expect(section(ready())).toBeNull();
+    expect(buildRaceModel(input({ status: { kind: "loading" } })).modelSection).toBeNull();
+    expect(buildRaceModel(input({ status: { kind: "error", message: "x" } })).modelSection).toBeNull();
+  });
+
+  it("prior が無くても出る(馬番の昇順)。暫定の見出し・列(3着内率の列は無い)・値の書式は馬ごとの評価の表と同じ。単勝が無い馬の確率×単勝は —", () => {
+    const s = section(ready({ model: BLOCK }));
+    expect(s, "前提: 節が出る").not.toBeNull();
+    expect(s!.heading).toBe("別の Worker の確率");
+    expect(s!.note).toBe("注記の文");
+    expect(s!.columns.map((c) => c.label)).toEqual(["馬番", "馬名", "確率(暫定)", "確率×単勝(暫定)", "補助(暫定)"]);
+    expect(s!.rows.map((r) => [r.umaban, r.name, r.prior, r.prob, r.ev, r.aux])).toEqual([
+      [1, null, null, "5.0%", "—", "−0.10(2位/2頭)"],
+      [3, null, null, "25.0%", "2.00", "+0.30(1位/2頭)"],
+    ]);
+  });
+
+  it("確定(final)の見出しは「暫定」なし。補助が 1 頭も無ければ補助の列は出さない", () => {
+    const s = section(ready({ model: { ...BLOCK, stage: "final", horses: [{ umaban: 1, prob: 0.1, ev: 1.5, aux: null }] } }));
+    expect(s!.columns.map((c) => c.label)).toEqual(["馬番", "馬名", "確率(別計算)", "確率×5分前単勝"]);
+    expect(s!.rows[0]!.ev).toBe("1.50");
+  });
+
+  it("朝が完了して prior があるときは、3着内率の列と馬名を足す(馬名・値は prior から。prior に無い馬は馬名なし・—)", () => {
+    const s = section(ready({ rows: [row(RACE_ID, "morning", "done", { prior: true })], prior: PRIOR, model: BLOCK }));
+    expect(s!.columns.map((c) => c.key)).toEqual(["umaban", "name", "prior", "prob", "ev", "aux"]);
+    expect(s!.rows.map((r) => [r.umaban, r.name, r.prior])).toEqual([[1, null, "31.0%"], [3, "アルファ", "52.3%"]]);
+    const extra = section(ready({ rows: [row(RACE_ID, "morning", "done", { prior: true })], prior: PRIOR, model: { ...BLOCK, horses: [...BLOCK.horses, { umaban: 5, prob: 0.1, ev: null, aux: null }] } }));
+    expect(extra!.rows.map((r) => [r.umaban, r.name, r.prior]), "prior に無い馬は馬名なし・3着内率は —").toEqual([[1, null, "31.0%"], [3, "アルファ", "52.3%"], [5, null, "—"]]);
+  });
+
+  it("朝が完了していない・板の prior が false なら、prior があっても列も馬名も出さない(カードの prior と同じ条件)", () => {
+    for (const rows of [[row(RACE_ID, "morning", "failed", { prior: true })], [row(RACE_ID, "morning", "done", { prior: false })], []]) {
+      const s = section(ready({ rows, prior: PRIOR, model: BLOCK }));
+      expect(s!.columns.map((c) => c.key), JSON.stringify(rows)).toEqual(["umaban", "name", "prob", "ev", "aux"]);
+      expect(s!.rows.every((r) => r.name === null && r.prior === null)).toBe(true);
+    }
+  });
+
+  it("各馬の成績は「馬番 馬名: 同じコース: … / 似たコース: …」の 1 行。成績を持つ馬だけ(1 頭も無ければ空)。回りの決まらない過去走は足す", () => {
+    const s = section(ready({ rows: [row(RACE_ID, "morning", "done", { prior: true })], prior: PRIOR, model: { ...BLOCK, horses: [{ ...BLOCK.horses[0]!, courseFit: { ...FIT, unknownRing: 2 } }, BLOCK.horses[1]!] } }));
+    expect(s!.fits).toEqual(["3 アルファ: 同じコース: 2走 1勝 3着内2(最高1着) / 似たコース: 0走 / 回りの決まらない過去走: 2"]);
+    const none = section(ready({ model: { ...BLOCK, horses: [BLOCK.horses[1]!] } }));
+    expect(none!.fits).toEqual([]);
+  });
+
+  it("コースの欄は、馬ごとの評価と同じ部品(見出し・今日のコース・似たコース・注記)。course が無ければ null", () => {
+    const s = section(ready({ model: BLOCK }));
+    expect(s!.course).not.toBeNull();
+    expect(s!.course!.heading).toBe("コースの類似(参考)");
+    expect(s!.course!.todayLine).toBe("今日のコース: 東京 芝1600");
+    expect(s!.course!.shape!.items).toEqual(["中山 芝2000 0.50"]);
+    expect(section(ready({ model: { ...BLOCK, course: undefined } }))!.course).toBeNull();
+  });
+
+  it("計算なしは、注記だけ(表の行・列・成績は空。コースも出さない)", () => {
+    const s = section(ready({ model: { status: "none", stage: null, note: "計算なし(準備中)", horses: [] } }));
+    expect(s).not.toBeNull();
+    expect(s!.note).toBe("計算なし(準備中)");
+    expect(s!.rows).toEqual([]);
+    expect(s!.columns).toEqual([]);
+    expect(s!.fits).toEqual([]);
+    expect(s!.course).toBeNull();
+  });
+
+  it("発走前の分析が済んでいる(板の発走前が done で analysisId あり)ときは出さない(詳しい中身の表と二重にしない)。実行中・失敗・id なしなら出す", () => {
+    expect(section(ready({ rows: [row(RACE_ID, "pre_race", "done", { analysisId: 7 })], model: BLOCK }))).toBeNull();
+    for (const r of [row(RACE_ID, "pre_race", "fetched"), row(RACE_ID, "pre_race", "failed", { analysisId: 7 }), row(RACE_ID, "pre_race", "done")]) {
+      expect(section(ready({ rows: [r], model: BLOCK })), JSON.stringify(r)).not.toBeNull();
+    }
+    expect(section(ready({ rows: [row(OTHER_RACE_ID, "pre_race", "done", { analysisId: 7 })], model: BLOCK })), "別のレースの分析では隠さない").not.toBeNull();
   });
 });

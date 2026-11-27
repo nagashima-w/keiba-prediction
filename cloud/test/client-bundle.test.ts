@@ -327,7 +327,10 @@ describe("生成物のドリフトと決定性", () => {
     // 実測(`Buffer.byteLength(CLIENT_JS)`)は 257,348(e51d3373 の生成物)→ 260,101(+2,753。`pnpm run build:client` の出力〈「260101 バイト」〉)。
     // 計り方: 起点と今のそれぞれの生成物を import し、`npx tsx -e "import {CLIENT_JS} from './src/client-bundle.generated'; console.log(Buffer.byteLength(CLIENT_JS))"` と同じ式で測った。新しい上限 261,000 の余裕は 261,000 - 260,101 = 899 バイト。
     // 増えたのは `api-analysis.ts` の `course`・`courseFit` の検査(集計・一覧・欄)、`result.ts` の文の組み立て(`courseFitLinesOf`・`courseSectionOf`)、`view.ts` の欄と成績の行、日本語の文言(`\u` エスケープ)。
-    expect(Buffer.byteLength(CLIENT_JS)).toBeLessThan(261_000);
+    // (追記)Issue #806(レースの画面の「事前分析」の下に、別の Worker の確率の表・各馬のコース成績・コースの欄を出す節): 上限は 261,000 から 264,000 へ引き上げた。
+    // 実測(`Buffer.byteLength(CLIENT_JS)`)は 260,426(633bd960 のコミット済みの生成物)→ 263,275(+2,849。`pnpm run build:client` の出力〈「263275 バイト」〉)。計り方は上と同じ式。新しい上限 264,000 の余裕は 264,000 - 263,275 = 725 バイト。
+    // 増えたのは `api-analysis.ts` の塊の検査(`parseRaceModelBlock`・`fetchRaceStatusWithModel`)、`race.ts` の節の組み立て、`view.ts` の節、日本語の文言(`\u` エスケープ)。新しい部品・色は足していない。
+    expect(Buffer.byteLength(CLIENT_JS)).toBeLessThan(264_000);
   });
 });
 

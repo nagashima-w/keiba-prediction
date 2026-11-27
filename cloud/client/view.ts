@@ -9,7 +9,7 @@ import type { BulkModel, BulkPanel } from "./bulk";
 import type { Badge } from "./badge";
 import type { ListModel, NextRaceItem, RaceGroupItem, RaceItem } from "./list";
 import type { Crumb, NeighborLink, RaceNeighbors } from "./neighbors";
-import type { CardResult, RaceModel, TaskCard } from "./race";
+import type { CardResult, ModelSection, RaceModel, TaskCard } from "./race";
 import { MARK_REPAIRED_BADGE } from "../../packages/core/src/view/format";
 import type { AllocationBetRowView } from "../../packages/core/src/view/allocation-proposal-view";
 import { ACTUAL_HIGHER_MARK, FAIR_WIN_ODDS_LABEL, LABEL_ADJUSTED_DIFF, LABEL_CONCERNS, LABEL_HIGHLIGHTS, shiftNote, type CloseSection, type CourseListView, type CourseSection, type DevelopmentSection, type HorseCard, type HorseSortKey, type HorseTable, type MarkedHorse, type MarketEdgeCell, type ResultContent, type ResultModel, type SortDir, type TopProbHorse } from "./result";
@@ -317,6 +317,31 @@ function neighborNodes(neighbors: RaceNeighbors | null): VNode[] {
   return [h("nav", { class: "tabs race-neighbors", "aria-label": "前後のレース" }, links)];
 }
 
+/**
+ * 「別の Worker の確率」の節(Issue #806)。新しい部品は足さず、馬ごとの評価の表の枠(`horse-table-wrap`・`horse-table`)・注記(`market-note`)・箇条書き(`points-list`)・コースの欄(`courseSection`)を使う。
+ * 文字列(注記・馬名・コース名)はすべてテキストノード。計算なしは見出しと注記だけ。並べ替え・開閉は付けない。
+ */
+function modelSectionNode(s: ModelSection): VNode {
+  const table =
+    s.rows.length === 0
+      ? []
+      : [
+          h("div", { class: "horse-table-wrap", role: "region", "aria-label": `${s.heading}の表` }, [
+            h("table", { class: "horse-table" }, [
+              h("thead", {}, [h("tr", {}, s.columns.map((c) => h("th", {}, [c.label])))]),
+              h("tbody", {}, s.rows.map((r) => h("tr", { class: "eval-row" }, s.columns.map((c) => h("td", {}, [c.key === "umaban" ? `${r.umaban}` : (r[c.key] ?? "")]))))),
+            ]),
+          ]),
+        ];
+  return h("section", { class: "card model-section" }, [
+    h("h2", {}, [s.heading]),
+    ...table,
+    h("p", { class: "market-note" }, [s.note]),
+    ...(s.fits.length === 0 ? [] : [h("ul", { class: "points-list model-fits" }, s.fits.map((line) => h("li", {}, [line])))]),
+    ...(s.course === null ? [] : [courseSection(s.course)]),
+  ]);
+}
+
 function raceScreen(model: RaceModel, actions: ViewActions): VNode {
   const controls = h("div", { class: "controls" }, [
     h("a", { class: "back", href: model.backHref }, ["一覧へ戻る"]),
@@ -328,7 +353,11 @@ function raceScreen(model: RaceModel, actions: ViewActions): VNode {
   } else if (model.cards === null) {
     body.push(h("p", { class: "empty" }, ["状態を読み込み中…"]));
   } else {
-    body.push(...model.cards.map((card) => taskCard(card, actions)));
+    // 別の Worker の確率の節(Issue #806)は、事前分析のカードの直後(カードの順は morning → pre_race。`model.modelSection` が null なら出さない)。
+    model.cards.forEach((card, i) => {
+      body.push(taskCard(card, actions));
+      if (i === 0 && model.modelSection !== null) body.push(modelSectionNode(model.modelSection));
+    });
   }
   const past = model.past;
   const pastBody: VNode[] = [];
