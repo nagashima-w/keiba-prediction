@@ -114,7 +114,7 @@ interface Harness {
 /** 計画の場コード(中央の行から出す。見本の東京・京都・新潟)。 */
 const GOOD_FACTS: BabaFacts = { kaisaiDate: DATE, planFinalized: true, centralListed: true, venueCodes: ["05", "08", "04"] };
 
-function harness(options: { facts?: Partial<BabaFacts>; sql?: NodeSql; store?: FakeStore; noFetcher?: boolean; noStore?: boolean; now?: number } = {}): Harness {
+function harness(options: { facts?: Partial<BabaFacts>; sql?: NodeSql; store?: FakeStore; noFetcher?: boolean; noStore?: boolean; now?: number; colo?: string | null } = {}): Harness {
   const sql = options.sql ?? openNodeSql();
   if (options.sql === undefined) {
     opened.push(sql);
@@ -146,6 +146,7 @@ function harness(options: { facts?: Partial<BabaFacts>; sql?: NodeSql; store?: F
     facts: () => facts,
     retryDelayMs: MIN,
     maxClaimAttempts: 3,
+    ...(options.colo === undefined ? {} : { colo: () => options.colo ?? null }),
   });
   return { stage, sql, store, clock, facts, warns, fetchCalls, behavior: h.behavior, atFetch };
 }
@@ -735,5 +736,51 @@ describe("失敗しても分析を止めず、秘匿を守る", () => {
     await h.stage.run();
     expect(h.warns).toHaveLength(2);
     expect(h.warns[1]).toContain("最後の枠");
+  });
+});
+
+
+describe("Issue #804: 失敗した枠の詳細(BabaFinish.failDetail = baba_fetch_attempts.fail_detail の元)", () => {
+  const withFailure = (result: BabaResultClass, failure: NonNullable<BabaFetchOutcome["failure"]>): BabaFetchOutcome => ({ ...failureOutcome(result), failure });
+  const finishOf = (h: Harness): BabaFinish => h.store.finishes[0]!.finish;
+
+  it("失敗した枠(result が ok でない)に、頁・種類・HTTP の状態・拠点を JSON で渡す。result は変えない", async () => {
+    const h = harness({ colo: "NRT" });
+    h.behavior.respond = () => withFailure("http-403", { page: "cushion", info: { kind: "blocked", http: 403 } });
+    await h.stage.run();
+    expect(finishOf(h).result).toBe("http-403");
+    expect(finishOf(h).failDetail).toBe('{"p":"cushion","k":"blocked","h":403,"c":"NRT"}');
+  });
+  it("拠点が無ければ c を出さない。応答が来る前の失敗は h も出さない", async () => {
+    const h = harness({ colo: null });
+    h.behavior.respond = () => withFailure("network", { page: "cushion", info: { kind: "dns", http: null } });
+    await h.stage.run();
+    expect(finishOf(h).failDetail).toBe('{"p":"cushion","k":"dns"}');
+  });
+  it("拠点の関数を渡さなくても動く(c を出さない)", async () => {
+    const h = harness();
+    h.behavior.respond = () => withFailure("timeout", { page: "moist", info: { kind: "timeout", http: null } });
+    await h.stage.run();
+    expect(finishOf(h).failDetail).toBe('{"p":"moist","k":"timeout"}');
+  });
+  it("result が ok の枠(開催情報などの取得の失敗があっても保存できた)は詳細を付けない(NULL)", async () => {
+    const h = harness({ colo: "NRT" });
+    h.behavior.respond = () => ({ ...sampleOutcome(), failure: { page: "access", info: { kind: "reset", http: null } } });
+    await h.stage.run();
+    expect(finishOf(h).result).toBe("ok");
+    expect(finishOf(h).failDetail).toBeNull();
+  });
+  it("取得の失敗の情報が無い失敗(読み取りの失敗・取得口の例外)は詳細なし(NULL)", async () => {
+    const h = harness({ colo: "NRT" });
+    h.behavior.respond = () => failureOutcome("shape-mismatch");
+    await h.stage.run();
+    expect(finishOf(h).failDetail).toBeNull();
+    const h2 = harness({ colo: "NRT" });
+    h2.behavior.respond = () => {
+      throw new BabaFetchError("timeout");
+    };
+    await h2.stage.run();
+    expect(h2.store.finishes[0]!.finish.result).toBe("timeout");
+    expect(h2.store.finishes[0]!.finish.failDetail).toBeNull();
   });
 });

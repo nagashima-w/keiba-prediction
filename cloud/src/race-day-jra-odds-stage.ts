@@ -15,6 +15,7 @@
  */
 import type { ComboBetType } from "../../packages/core/src/scraper/combo-odds-key";
 import { JRA_ODDS_PAGES, parseJraOddsCname, type JraOddsPage, type JraOddsRaceLinks } from "../../packages/core/src/scraper/parse-jra-odds-index";
+import type { JraFailInfo } from "./jra-fail-detail";
 import type { JraOddsFailure, JraOddsFetcher, JraOddsSession } from "./jra-odds-fetch";
 import { JRA_PAGE_FOR_BET, jraLinksCacheKey, jraOddsCacheKey, parseJraOddsPage } from "./jra-odds-cache";
 import type { JraOddsStagePort } from "./race-day-jra-odds";
@@ -36,11 +37,16 @@ export interface JraOddsStageDeps {
   readonly onPageFailure?: (failure: JraOddsPageFailure) => void;
 }
 
-/** 頁の失敗。`fetch-failed` = 取得口の失敗(word は取得口の語) / `parse-failed` = 読み取りの失敗(word は `unavailable`・`parse-error`)。 */
+/**
+ * 頁の失敗。`fetch-failed` = 取得口の失敗(word は取得口の語) / `parse-failed` = 読み取りの失敗(word は `unavailable`・`parse-error`)。
+ * `page` は、開催選択・レース選択(場・レースのリンクを拾う取得)の失敗のときは `discover`(Issue #804。このときは残りの全頁が failed になる。通知は 1 回だけ)。
+ * `failInfo` は取得口の失敗のうち、通信・HTTP の失敗にだけ付く詳細(種類と HTTP の状態。Issue #804)。
+ */
 export interface JraOddsPageFailure {
-  readonly page: JraOddsPage;
+  readonly page: JraOddsPage | "discover";
   readonly kind: "fetch-failed" | "parse-failed";
   readonly word: string;
+  readonly failInfo?: JraFailInfo;
 }
 
 const BET_FOR_PAGE: Partial<Record<JraOddsPage, ComboBetType>> = Object.fromEntries(
@@ -91,10 +97,10 @@ export class JraOddsStage {
     page: JraOddsPage,
     cname: string,
     date: string,
-  ): Promise<{ readonly status: "ok" } | { readonly status: "fetch-failed"; readonly word: string } | { readonly status: "parse-failed"; readonly word: string }> {
+  ): Promise<{ readonly status: "ok" } | { readonly status: "fetch-failed"; readonly word: string; readonly failInfo?: JraFailInfo } | { readonly status: "parse-failed"; readonly word: string }> {
     const result = await session.fetchOdds(cname);
     if (result.status !== "ok") {
-      return { status: "fetch-failed", word: result.status };
+      return result.failInfo === undefined ? { status: "fetch-failed", word: result.status } : { status: "fetch-failed", word: result.status, failInfo: result.failInfo };
     }
     const parsed = parseJraOddsPage(page, result.value, toIsoDate(date), BET_FOR_PAGE[page]);
     if (parsed.status !== "ok") {
@@ -126,10 +132,10 @@ export class JraOddsStage {
         }
       };
       /** 開催選択 → レース選択をたどり、場の全レースのリンクを置く。失敗の語か、このレースのリンクを返す。 */
-      const discover = async (): Promise<{ readonly links: JraOddsRaceLinks } | { readonly failure: JraOddsFailure }> => {
+      const discover = async (): Promise<{ readonly links: JraOddsRaceLinks } | { readonly failure: JraOddsFailure; readonly failInfo?: JraFailInfo }> => {
         const venues = await session.listVenues(date);
         if (venues.status !== "ok") {
-          return { failure: venues.status };
+          return venues.failInfo === undefined ? { failure: venues.status } : { failure: venues.status, failInfo: venues.failInfo };
         }
         const venue = venues.value.find((v) => v.venueCode === raceId.slice(4, 6));
         if (venue === undefined) {
@@ -137,7 +143,7 @@ export class JraOddsStage {
         }
         const races = await session.listRaces(venue);
         if (races.status !== "ok") {
-          return { failure: races.status };
+          return races.failInfo === undefined ? { failure: races.status } : { failure: races.status, failInfo: races.failInfo };
         }
         let mine: JraOddsRaceLinks | null = null;
         for (const links of races.value) {
@@ -164,6 +170,7 @@ export class JraOddsStage {
         if ("failure" in found) {
           sent = session.requestCount;
           this.failAll(raceId, instance, found.failure);
+          this.reportFailure({ page: "discover", kind: "fetch-failed", word: safeWord(found.failure), ...(found.failInfo === undefined ? {} : { failInfo: found.failInfo }) });
           this.info(raceId, batch.length, 0, batch.length, sent, startedAt);
           return;
         }
@@ -185,7 +192,7 @@ export class JraOddsStage {
           rediscovered = true; // たどり直しは段全体で 1 回だけ
           const found = await discover();
           if ("failure" in found) {
-            result = { status: "fetch-failed", word: found.failure };
+            result = found.failInfo === undefined ? { status: "fetch-failed", word: found.failure } : { status: "fetch-failed", word: found.failure, failInfo: found.failInfo };
           } else {
             links = found.links;
             result = await this.fetchAndStore(session, raceId, page, links.cnames[page], date);
@@ -195,7 +202,7 @@ export class JraOddsStage {
           store.mark(raceId, instance, page, "failed");
           failed += 1;
           this.deps.onWarn(`JRA オッズの取得に失敗しました(${raceId}。頁 ${page}): ${safeWord(result.word)}`);
-          this.reportFailure({ page, kind: "fetch-failed", word: safeWord(result.word) });
+          this.reportFailure({ page, kind: "fetch-failed", word: safeWord(result.word), ...(result.failInfo === undefined ? {} : { failInfo: result.failInfo }) });
           continue;
         }
         if (result.status === "parse-failed") {

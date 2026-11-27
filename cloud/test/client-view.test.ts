@@ -2132,7 +2132,7 @@ describe("別の Worker が計算した確率の列の VNode(Issue #796)", () =>
   it("th は 既存 7 + 2、各行の td も 9。見出しは並べ替えのボタンにしない。値が無い馬は「—」。既存のセルは変わらない", () => {
     const t = resultOf(mk());
     const ths = findAll(t, (n) => n.tag === "th");
-    expect(ths.map(textOf).slice(-2)).toEqual(["確率(別計算)", "確率×5分前単勝"]);
+    expect(ths.map(textOf).slice(-2)).toEqual(["確率(新モデル)", "確率×5分前単勝"]);
     expect(ths).toHaveLength(9);
     expect(byClass(t, "sort-button")).toHaveLength(5);
     const [r1, r2] = rowsOf(t);
@@ -2178,9 +2178,9 @@ describe("補助の符号の列の VNode(Issue #800)", () => {
     expect(findAll(rows[0]!, (n) => n.tag === "td").map(rawTextOf).slice(-3)).toEqual(["25.0%", "2.00", "+0.42(2位/16頭)"]);
     expect(findAll(rows[1]!, (n) => n.tag === "td").map(rawTextOf).slice(-3)).toEqual(["50.0%", "—", "—"]);
   });
-  it("確定は今までの見出し + 補助(別計算)", () => {
+  it("確定は今までの見出し + 補助(新モデル)", () => {
     const ths = findAll(resultOf(withSign("final")), (n) => n.tag === "th");
-    expect(ths.map(textOf).slice(-3)).toEqual(["確率(別計算)", "確率×5分前単勝", "補助(別計算)"]);
+    expect(ths.map(textOf).slice(-3)).toEqual(["確率(新モデル)", "確率×5分前単勝", "補助(新モデル)"]);
   });
 });
 const HORSES_FOR_SIGN = [
@@ -2219,7 +2219,7 @@ describe("別の Worker の確率の節の VNode(Issue #806)", () => {
   it("見出し・表(列は馬番・馬名・3着内率・確率・確率×単勝・補助)・注記・各馬の成績・コースの欄が、この順で出る。表は馬ごとの評価の表の枠と同じ class", () => {
     const sec = sectionOf(tree(BLOCK));
     expect(sec.tag).toBe("section");
-    expect(textOf(findAll(sec, (n) => n.tag === "h2")[0]!)).toBe("別の Worker の確率");
+    expect(textOf(findAll(sec, (n) => n.tag === "h2")[0]!)).toBe("新モデルでの分析");
     const ths = findAll(sec, (n) => n.tag === "th").map(textOf);
     expect(ths).toEqual(["馬番", "馬名", "3着内率", "確率(暫定)", "確率×単勝(暫定)", "補助(暫定)"]);
     const trs = findAll(sec, (n) => n.tag === "tr" && findAll(n, (c) => c.tag === "td").length > 0);

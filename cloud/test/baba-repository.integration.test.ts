@@ -56,7 +56,7 @@ describe("claim(枠の試みの先行記録。Issue #480 で 1 日 1 回から 1
     const store = new D1BabaStore({ db: local.db });
     expect(await store.claim(DATE, 0, 1_000)).toBe("claimed");
     expect(await all("SELECT * FROM baba_fetch_attempts")).toEqual([
-      { kaisai_date: DATE, slot: 0, attempted_at: 1_000, finished_at: null, result: null, api_fetched_at: null, venues_saved: null, venues_dropped: null, dropped_json: null, complete: null },
+      { kaisai_date: DATE, slot: 0, attempted_at: 1_000, finished_at: null, result: null, api_fetched_at: null, venues_saved: null, venues_dropped: null, dropped_json: null, complete: null, fail_detail: null },
     ]);
     expect(await all("SELECT * FROM baba_fetches")).toEqual([
       { kaisai_date: DATE, attempted_at: 1_000, finished_at: null, result: null, api_fetched_at: null, venues_saved: null, venues_dropped: null, dropped_json: null },
@@ -132,6 +132,7 @@ describe("finish(結果の記録)", () => {
         venues_dropped: 1,
         dropped_json: JSON.stringify(DROPPED),
         complete: 1,
+        fail_detail: null, // ok の枠は詳細なし(0051。Issue #804)
       },
     ]);
     expect(await all("SELECT * FROM baba_fetches")).toEqual([
@@ -176,6 +177,22 @@ describe("finish(結果の記録)", () => {
     ]);
     expect(await all("SELECT result, finished_at, venues_saved FROM baba_fetches")).toEqual([{ result: "http-503", finished_at: 2_000, venues_saved: 0 }]);
     expect(await all("SELECT COUNT(*) AS n FROM baba_conditions")).toEqual([{ n: 0 }]);
+  });
+
+  it("#804: 失敗の詳細(failDetail)は枠の行の fail_detail にだけ入る(日の要約 baba_fetches には列が無い)。無ければ NULL。再度の更新で別の枠の値は変わらない", async () => {
+    const store = new D1BabaStore({ db: local.db });
+    await store.claim(DATE, 0, 1_000);
+    await store.claim(DATE, 1, 2_000);
+    await store.claim(DATE, 2, 3_000);
+    await store.finish(DATE, fin({ slot: 0, finishedAt: 1_500, result: "http-403", failDetail: '{"p":"cushion","k":"blocked","h":403,"c":"NRT"}' }));
+    await store.finish(DATE, fin({ slot: 1, finishedAt: 2_500, result: "network", failDetail: null }));
+    await store.finish(DATE, fin({ slot: 2, finishedAt: 3_500, result: "timeout" })); // 省略(旧い呼び出し)も NULL
+    expect(await all("SELECT slot, result, fail_detail FROM baba_fetch_attempts ORDER BY slot")).toEqual([
+      { slot: 0, result: "http-403", fail_detail: '{"p":"cushion","k":"blocked","h":403,"c":"NRT"}' },
+      { slot: 1, result: "network", fail_detail: null },
+      { slot: 2, result: "timeout", fail_detail: null },
+    ]);
+    expect(Object.keys((await all("SELECT * FROM baba_fetches"))[0]!)).not.toContain("fail_detail");
   });
 
   it("原子的: 競馬場の行の 1 つが書けなければ、結果の更新(枠・日の要約)も他の競馬場の行も残らない(batch)", async () => {

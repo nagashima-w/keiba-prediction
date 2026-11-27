@@ -105,13 +105,19 @@ describe("開催の選択 → レースの選択 → オッズの頁(取得口�
 
 describe("失敗の分類(例外は投げない。文面・URL・本文は残さない)", () => {
   it.each([
-    ["404", () => html(new Uint8Array([1]), 404), "http-404"],
-    ["500", () => html(new Uint8Array([1]), 500), "http-500"],
-    ["リダイレクト", () => new Response(null, { status: 302, headers: { location: "https://x.invalid/" } }), "redirect"],
-    ["パラメータエラー", () => html(PARAM_ERROR), "param-error"],
-  ] as const)("%s は %s", async (_n, respond, expected) => {
+    // 失敗の詳細(failInfo。Issue #804)は、通信・HTTP の失敗にだけ付く。param-error(HTTP 200 の頁の読み取り)には付かない。
+    ["404", () => html(new Uint8Array([1]), 404), { status: "http-404", failInfo: { kind: "http", http: 404 } }],
+    ["500", () => html(new Uint8Array([1]), 500), { status: "http-500", failInfo: { kind: "http", http: 500 } }],
+    ["リダイレクト", () => new Response(null, { status: 302, headers: { location: "https://x.invalid/" } }), { status: "redirect", failInfo: { kind: "redirect", http: 302 } }],
+    ["パラメータエラー", () => html(PARAM_ERROR), { status: "param-error" }],
+  ] as const)("%s は %j", async (_n, respond, expected) => {
     const h = harness(respond);
-    expect(await h.session().fetchOdds(R8_TANPUKU)).toEqual({ status: expected });
+    expect(await h.session().fetchOdds(R8_TANPUKU)).toEqual(expected);
+  });
+
+  it("403 で server が AkamaiGHost なら failInfo の種類は blocked(状態の語は http-403 のまま)", async () => {
+    const h = harness(() => new Response("x", { status: 403, headers: { server: "AkamaiGHost" } }));
+    expect(await h.session().fetchOdds(R8_TANPUKU)).toEqual({ status: "http-403", failInfo: { kind: "blocked", http: 403 } });
   });
 
   it("fetch が例外を投げても、分類名だけを返す(メッセージ・URL を含めない)", async () => {
@@ -122,8 +128,21 @@ describe("失敗の分類(例外は投げない。文面・URL・本文は残さ
       wait: async () => undefined,
     });
     const r = await fetcher.open().fetchOdds(R8_TANPUKU);
-    expect(r).toEqual({ status: "network" });
+    expect(r).toEqual({ status: "network", failInfo: { kind: "unknown", http: null } });
     expect(JSON.stringify(r)).not.toContain("secret");
+  });
+
+  it("例外の種類(dns・reset)と、開催選択・レース選択・式別の頁のどれの失敗にも failInfo が付く(Issue #804)", async () => {
+    const throwing = (message: string) =>
+      createJraOddsFetcher({
+        fetch: async () => {
+          throw Object.assign(new Error(message), { name: "Error" });
+        },
+        wait: async () => undefined,
+      }).open();
+    expect(await throwing("internal error; reference = x").listVenues("20261108")).toEqual({ status: "network", failInfo: { kind: "dns", http: null } });
+    expect(await throwing("Network connection lost.").listRaces({ venueCode: "05", year: "2026", kai: "05", day: "02", date: "20261108", racesCname: TOKYO_ORL })).toEqual({ status: "network", failInfo: { kind: "reset", http: null } });
+    expect(await throwing("Network connection lost.").fetchOdds(R8_TANPUKU)).toEqual({ status: "network", failInfo: { kind: "reset", http: null } });
   });
 
   it("開催選択に入口のリンクが無い頁は shape-mismatch。指定の日の場が無いだけなら ok の空", async () => {
@@ -147,7 +166,7 @@ describe("本文の上限", () => {
     const r = await ok.session().fetchOdds(R8_SANRENTAN);
     expect(r.status).toBe("ok");
     const big = harness(() => new Response(new Uint8Array(10), { status: 200, headers: { "content-length": String(JRA_ODDS_MAX_BODY_BYTES + 1) } }));
-    expect(await big.session().fetchOdds(R8_SANRENTAN)).toEqual({ status: "too-large" });
+    expect(await big.session().fetchOdds(R8_SANRENTAN)).toEqual({ status: "too-large", failInfo: { kind: "too-large", http: 200 } });
   });
 
   it("content-length が無くても、読んだ合計が上限を超えたら too-large", async () => {
@@ -159,7 +178,7 @@ describe("本文の上限", () => {
       },
     });
     const h = harness(() => new Response(stream, { status: 200 }));
-    expect(await h.session().fetchOdds(R8_SANRENTAN)).toEqual({ status: "too-large" });
+    expect(await h.session().fetchOdds(R8_SANRENTAN)).toEqual({ status: "too-large", failInfo: { kind: "too-large", http: 200 } });
   });
 });
 
@@ -265,7 +284,7 @@ describe("fetchJraRaceOdds(1 レースぶんの式別の頁。cname の拾い方
     expect(r1.pages).toEqual({ tanpuku: { status: "http-503" }, wide: { status: "http-503" } });
     const h2 = harness((call) => (call.body?.startsWith("cname=pw151ou") ? html(new Uint8Array([1]), 500) : call.body?.startsWith("cname=pw155ou") ? html(TANPUKU) : fakeJra(call)));
     const r2 = await fetchJraRaceOdds(h2.session(), { date: "20261108", raceId: "202605050208", pages: ["tanpuku", "wide"] });
-    expect(r2.pages.tanpuku).toEqual({ status: "http-500" });
+    expect(r2.pages.tanpuku).toEqual({ status: "http-500", failInfo: { kind: "http", http: 500 } });
     expect(r2.pages.wide?.status).toBe("ok");
   });
 

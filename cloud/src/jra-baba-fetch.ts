@@ -23,7 +23,7 @@
  * 結果の分類は、1 場以上を保存できれば `ok`、クッション値も含水率も読めなければクッション値の失敗の語(クッション値が読めて含水率が失敗ならその語、どちらも ok で当日の値が無ければ `no-today-venues`)。
  * 例外は投げない。
  */
-import type { BabaFetcher, BabaFetchOutcome, BabaResultClass } from "./baba-conditions";
+import type { BabaFetcher, BabaFetchFailure, BabaFetchOutcome, BabaResultClass } from "./baba-conditions";
 import {
   assembleBabaVenues,
   parseAccessJson,
@@ -88,8 +88,10 @@ export function createJraBabaFetcher(deps: CreateJraBabaFetcherDeps = {}): BabaF
 
   return async (nowMs: number): Promise<BabaFetchOutcome> => {
     let first = true;
-    /** 1 本を取って文字列にする。2 本目以降は先に待つ。失敗は語に落とす(投げない)。 */
-    const page = async (url: string, init: RequestInit): Promise<Page> => {
+    /** 最初に失敗したページの詳細(Issue #804。取得の失敗だけ。読み取りの失敗は入らない)。 */
+    let failure: BabaFetchFailure | undefined;
+    /** 1 本を取って文字列にする。2 本目以降は先に待つ。失敗は語に落とす(投げない)。`label` は失敗の詳細に残すページの語。 */
+    const page = async (url: string, init: RequestInit, label: BabaFetchFailure["page"]): Promise<Page> => {
       if (deps.pacer !== undefined) {
         await deps.pacer.beforeRequest();
       } else if (!first) {
@@ -98,10 +100,15 @@ export function createJraBabaFetcher(deps: CreateJraBabaFetcherDeps = {}): BabaF
       first = false;
       const fetched = await fetchOne(fetchFn, url, init, timeoutMs);
       const status = fetched.summary.status;
+      const noteFailure = (): void => {
+        failure ??= { page: label, info: { kind: fetched.failKind ?? "unknown", http: fetched.summary.httpStatus } };
+      };
       if (typeof status !== "number") {
+        noteFailure();
         return { status };
       }
       if (status < 200 || status >= 300 || fetched.body === null) {
+        noteFailure();
         return { status: `http-${status}` };
       }
       try {
@@ -111,13 +118,13 @@ export function createJraBabaFetcher(deps: CreateJraBabaFetcherDeps = {}): BabaF
       }
     };
 
-    const cushionPage = await page(JRA_CUSHION_URL, { method: "GET" });
+    const cushionPage = await page(JRA_CUSHION_URL, { method: "GET" }, "cushion");
     const cushion = cushionPage.status === "ok" ? parseCushionHtml(cushionPage.text) : null;
     const cushionStatus: BabaSourceStatus = cushionPage.status === "ok" && cushion === null ? "shape-mismatch" : cushionPage.status;
     // クッション値のページを取り終えた時刻(以降の本を待つあいだに進んだ時計ではない)。読めなかった(shape-mismatch)ときは null。
     const apiFetchedAt = cushionStatus === "ok" ? new Date(clock()).toISOString() : null;
 
-    const moistPage = await page(JRA_MOIST_URL, { method: "GET" });
+    const moistPage = await page(JRA_MOIST_URL, { method: "GET" }, "moist");
     const moist = moistPage.status === "ok" ? parseMoistHtml(moistPage.text) : null;
     const moistStatus: BabaSourceStatus = moistPage.status === "ok" && moist === null ? "shape-mismatch" : moistPage.status;
 
@@ -126,7 +133,7 @@ export function createJraBabaFetcher(deps: CreateJraBabaFetcherDeps = {}): BabaF
     // 当日の値のある場が無ければ、開催情報とコースには出ない(保存する場が無い)。
     const measured = assembleBabaVenues({ nowMs, cushion, moist, access: null, courses: [], sources });
     if (measured.venues.length === 0) {
-      return { result: failureClass(cushionStatus, moistStatus), venues: [], dropped: measured.dropped, droppedDetails: measured.droppedDetails, apiFetchedAt, listedVenueCodes: measured.listedVenueCodes };
+      return { result: failureClass(cushionStatus, moistStatus), ...failureOf(failure), venues: [], dropped: measured.dropped, droppedDetails: measured.droppedDetails, apiFetchedAt, listedVenueCodes: measured.listedVenueCodes };
     }
 
     // 開催情報(公式の馬場状態)。
@@ -134,7 +141,7 @@ export function createJraBabaFetcher(deps: CreateJraBabaFetcherDeps = {}): BabaF
       method: "POST",
       headers: { "content-type": "application/x-www-form-urlencoded" },
       body: JRA_ACCESS_BODY,
-    });
+    }, "access");
     const access: AccessVenue[] | null = accessPage.status === "ok" ? parseAccessJson(accessPage.text) : null;
     const accessStatus: BabaSourceStatus = accessPage.status === "ok" && access === null ? "shape-mismatch" : accessPage.status;
 
@@ -146,7 +153,7 @@ export function createJraBabaFetcher(deps: CreateJraBabaFetcherDeps = {}): BabaF
         courseStatus = status;
       }
     };
-    const firstPage = await page(jraCourseUrl(1), { method: "GET" });
+    const firstPage = await page(jraCourseUrl(1), { method: "GET" }, "course");
     const firstCourse = firstPage.status === "ok" ? parseCoursePage(firstPage.text) : null;
     if (firstCourse === null) {
       noteCourse(firstPage.status === "ok" ? "shape-mismatch" : firstPage.status);
@@ -154,7 +161,7 @@ export function createJraBabaFetcher(deps: CreateJraBabaFetcherDeps = {}): BabaF
       courses.push(firstCourse);
       const count = Math.min(firstCourse.tabs.length, MAX_COURSE_PAGES);
       for (let n = 2; n <= count; n += 1) {
-        const next = await page(jraCourseUrl(n), { method: "GET" });
+        const next = await page(jraCourseUrl(n), { method: "GET" }, "course");
         const parsed = next.status === "ok" ? parseCoursePage(next.text) : null;
         if (parsed === null) {
           noteCourse(next.status === "ok" ? "shape-mismatch" : next.status);
@@ -168,6 +175,7 @@ export function createJraBabaFetcher(deps: CreateJraBabaFetcherDeps = {}): BabaF
     const assembled = assembleBabaVenues({ nowMs, cushion, moist, access, courses, sources });
     return {
       result: assembled.venues.length > 0 ? "ok" : failureClass(cushionStatus, moistStatus),
+      ...failureOf(failure),
       venues: assembled.venues,
       dropped: assembled.dropped,
       droppedDetails: assembled.droppedDetails,
@@ -175,6 +183,11 @@ export function createJraBabaFetcher(deps: CreateJraBabaFetcherDeps = {}): BabaF
       listedVenueCodes: assembled.listedVenueCodes,
     };
   };
+}
+
+/** 失敗の詳細を outcome に足す形(無ければ何も足さない)。 */
+function failureOf(failure: BabaFetchFailure | undefined): { readonly failure?: BabaFetchFailure } {
+  return failure === undefined ? {} : { failure };
 }
 
 /** 保存する場が無いときの分類。両方とも読めていれば当日の値が無い(`no-today-venues`)。読めなかった側があれば、その失敗の語(クッション値を先に見る)。 */

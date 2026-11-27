@@ -19,6 +19,8 @@ D1 と Durable Object(DO)の SQLite に新しい SQL を足すとき、全走査
 6. SQL 別の集計(`d1QueriesAdaptiveGroups`)には出ない SQL がある。
    集計に出ないことを「走っていない」の根拠にしない。整合検査は、ログでは動いているのに集計に出ない(db-usage-594.md §7)。
 7. **新しい SQL を足したら、実行計画の検査も足す。** 次の節のとおり。
+8. 既存の表に列を足すときは、`ALTER TABLE ... ADD COLUMN` の 1 文だけにして、NULL 可で足す(#804 の `fail_detail`)。
+   既存の行は書き換えない。`WITHOUT ROWID` の表でも、列を足すだけでは索引の行は増えない。ただし、書く側の `INSERT`・`UPDATE` の列と束縛の数が変わるので、その SQL を固定しているテストも直す。
 
 ## 実行計画の検査
 

@@ -43,7 +43,7 @@ const CLAIM_DAY_SQL = "INSERT INTO baba_fetches (kaisai_date, attempted_at) VALU
 /** 枠の行の更新。`venues_saved` はこの回の `saved_at` で書かれた行の数(競馬場の書き込みの後の文で実行する)。 */
 const FINISH_ATTEMPT_SQL =
   "UPDATE baba_fetch_attempts SET finished_at = ?, result = ?, api_fetched_at = ?, " +
-  "venues_saved = (SELECT COUNT(*) FROM baba_conditions WHERE kaisai_date = ? AND saved_at = ?), venues_dropped = ?, dropped_json = ?, complete = ? " +
+  "venues_saved = (SELECT COUNT(*) FROM baba_conditions WHERE kaisai_date = ? AND saved_at = ?), venues_dropped = ?, dropped_json = ?, complete = ?, fail_detail = ? " +
   "WHERE kaisai_date = ? AND slot = ?";
 
 /** 保持の条件: 既に ok の日の要約を、後の回の失敗で上書きしない。 */
@@ -239,7 +239,7 @@ export class D1BabaStore implements BabaStore, BabaReader {
       ...finish.venues.map((v) => this.db.prepare(CONDITION_SQL).bind(...conditionBinds(kaisaiDate, v, finish.finishedAt))),
       this.db
         .prepare(FINISH_ATTEMPT_SQL)
-        .bind(finish.finishedAt, finish.result, finish.apiFetchedAt, kaisaiDate, finish.finishedAt, finish.dropped, droppedJson, finish.complete ? 1 : 0, kaisaiDate, finish.slot),
+        .bind(finish.finishedAt, finish.result, finish.apiFetchedAt, kaisaiDate, finish.finishedAt, finish.dropped, droppedJson, finish.complete ? 1 : 0, finish.failDetail ?? null, kaisaiDate, finish.slot),
       this.db
         .prepare(FINISH_DAY_SQL)
         .bind(finish.result, finish.finishedAt, finish.result, finish.apiFetchedAt, finish.result, finish.dropped, finish.result, droppedJson, kaisaiDate, finish.result, finish.result, kaisaiDate),

@@ -175,7 +175,7 @@ export interface ModelSection {
   readonly course: CourseSection | null;
 }
 
-export const MODEL_SECTION_HEADING = "別の Worker の確率";
+export const MODEL_SECTION_HEADING = "新モデルでの分析";
 
 const ERROR_MAX = 200;
 

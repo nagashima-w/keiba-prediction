@@ -615,7 +615,7 @@ describe("パンくずと前後のレース(Issue #571)", () => {
  * Issue #806: 事前分析のカードの下の「別の Worker の確率」の節(`model.modelSection`)。状態の応答の `model` から作る。
  * 発走前の分析が済んでいる(詳しい中身が出る)ときは出さない(二重にしない)。朝の prior が無くても出す。計算なしは注記だけ(表を出さない)。
  */
-describe("modelSection(別の Worker の確率の節)", () => {
+describe("modelSection(新モデルでの分析の節)", () => {
   const FIT = { same: { runs: 2, wins: 1, top3: 2, best: 1 }, similar: { runs: 0, wins: 0, top3: 0, best: null }, unknownRing: 0 };
   const BLOCK: RaceModelBlock = {
     status: "ok",
@@ -644,7 +644,7 @@ describe("modelSection(別の Worker の確率の節)", () => {
   it("prior が無くても出る(馬番の昇順)。暫定の見出し・列(3着内率の列は無い)・値の書式は馬ごとの評価の表と同じ。単勝が無い馬の確率×単勝は —", () => {
     const s = section(ready({ model: BLOCK }));
     expect(s, "前提: 節が出る").not.toBeNull();
-    expect(s!.heading).toBe("別の Worker の確率");
+    expect(s!.heading).toBe("新モデルでの分析");
     expect(s!.note).toBe("注記の文");
     expect(s!.columns.map((c) => c.label)).toEqual(["馬番", "馬名", "確率(暫定)", "確率×単勝(暫定)", "補助(暫定)"]);
     expect(s!.rows.map((r) => [r.umaban, r.name, r.prior, r.prob, r.ev, r.aux])).toEqual([
@@ -655,7 +655,7 @@ describe("modelSection(別の Worker の確率の節)", () => {
 
   it("確定(final)の見出しは「暫定」なし。補助が 1 頭も無ければ補助の列は出さない", () => {
     const s = section(ready({ model: { ...BLOCK, stage: "final", horses: [{ umaban: 1, prob: 0.1, ev: 1.5, aux: null }] } }));
-    expect(s!.columns.map((c) => c.label)).toEqual(["馬番", "馬名", "確率(別計算)", "確率×5分前単勝"]);
+    expect(s!.columns.map((c) => c.label)).toEqual(["馬番", "馬名", "確率(新モデル)", "確率×5分前単勝"]);
     expect(s!.rows[0]!.ev).toBe("1.50");
   });
 

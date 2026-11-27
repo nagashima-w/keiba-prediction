@@ -7,6 +7,8 @@
  * 外部の API の時代にあった `not-json`・`stale` は、新しい取得では起きない(D1 の既存の行には残りうる。読み出しは文字列のまま扱う)。
  */
 
+import type { JraFailInfo } from "./jra-fail-detail";
+
 /** 取得の結果の分類(`baba_fetches.result`)。固定の語だけ。 */
 export type BabaResultClass =
   | "ok"
@@ -85,9 +87,20 @@ export const BABA_DROPPED_DETAIL_LIMIT = 20;
 /** 詳細に残す計測日時の文字列の長さの上限。 */
 export const BABA_MEASURED_TEXT_LIMIT = 40;
 
+/**
+ * 最初に失敗した JRA のページの詳細(Issue #804。`baba_fetch_attempts.fail_detail` の元)。**取得(通信・HTTP)の失敗だけ**(読み取りの失敗は入らない)。
+ * `page` は失敗したページ(クッション値・含水率・開催情報・コースの 4 つ)、`info` は種類と HTTP の状態。
+ */
+export interface BabaFetchFailure {
+  readonly page: "cushion" | "moist" | "access" | "course";
+  readonly info: JraFailInfo;
+}
+
 /** 1 回の取得の結果(取得口が返し、`BabaStage` が D1 に記録する)。 */
 export interface BabaFetchOutcome {
   readonly result: BabaResultClass;
+  /** 最初に失敗したページの詳細(Issue #804)。取得の失敗が無ければ無い。`result` や `rawJson.sources` の語は変えない。 */
+  readonly failure?: BabaFetchFailure;
   /** 当日の競馬場だけ(`result` が `ok` のときだけ 1 件以上)。 */
   readonly venues: readonly BabaVenueRecord[];
   /** 捨てた競馬場の件数(当日でない・読めない・場名が不明)。 */

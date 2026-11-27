@@ -113,6 +113,9 @@ export interface OddsSnapshotCombos {
   readonly sanrentan?: OddsSnapshotComboPage;
 }
 
+/** `failDetail` の形(`buildFailDetail` の出力: p・k・(h)・(c))。 */
+const FAIL_DETAIL_SHAPE = /^\{"p":"[a-z]{1,12}","k":"[a-z0-9-]{1,12}"(,"h":[1-5]\d\d)?(,"c":"[A-Z]{3}")?\}$/;
+
 /** 1 レースの記録(DO の `payload_json` と、D1 の行の元)。 */
 export interface OddsSnapshotPayload {
   readonly raceId: string;
@@ -134,6 +137,11 @@ export interface OddsSnapshotPayload {
   readonly horses: readonly OddsSnapshotHorse[] | null;
   /** 馬連・枠連・ワイド・3連複の全組(#751)。`ok` のときだけ(それ以外は null。古い形の DO の結果にも無い)。単勝・複勝が取れていれば、組合せが取れなくても `ok`(頁ごとに {err})。 */
   readonly combos: OddsSnapshotCombos | null;
+  /**
+   * 取れなかった(`failed`)行の失敗の詳細(Issue #804。D1 の `odds_snapshots.fail_detail`)。固定の鍵と語だけの短い JSON(`{"p":頁,"k":種類,"h":HTTP の状態,"c":拠点}`。
+   * 組み立ては `jra-fail-detail.ts` の `buildFailDetail`)。`failed` の行にだけ付く(ok・skipped と、導入前に DO に置かれた結果には無い)。
+   */
+  readonly failDetail?: string | null;
 }
 
 /** 頁の値から馬ごとの配列を作る(馬番の昇順。単勝・複勝・馬の ID のどれかにだけある馬番も落とさない)。 */
@@ -259,6 +267,10 @@ export function parseOddsSnapshotPayload(text: string): OddsSnapshotPayload | nu
         return null;
       }
     } else if (p.horses !== null || (p.reason !== "too-late" && p.reason !== "fetch-failed")) {
+      return null;
+    }
+    // failDetail(#804)は、無い古い形も有効。ある場合は failed の行の固定の形だけ(DO の状態から D1 へ外の文字列を通さない)。
+    if (p.failDetail !== undefined && p.failDetail !== null && (p.status !== "failed" || typeof p.failDetail !== "string" || !FAIL_DETAIL_SHAPE.test(p.failDetail))) {
       return null;
     }
     return { ...p, combos } as unknown as OddsSnapshotPayload;

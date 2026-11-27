@@ -5,10 +5,12 @@
  *  - 1 本につき fetch は 1 回だけ。再試行しない。リダイレクトは追わない(`redirect: "manual"`。3xx は `redirect` の失敗)。
  *  - タイムアウトは {@link JRA_TIMEOUT_MS}(本文の読み出しも含む。1 本ごと)。本文は {@link JRA_MAX_BODY_BYTES} まで(超えたら打ち切って `too-large`)。出馬表の詳細ページだけ、`fetchOne` の引数で {@link JRA_ENTRY_MAX_BODY_BYTES}(Issue #639)。
  *  - UA などのヘッダは付けない(#488 で、素の fetch で届くと確かめた)。
- *  - 例外のメッセージ・URL・本文は残さない(失敗は分類名だけ)。Shift_JIS は `iconv-lite` で読む(`TextDecoder("shift_jis")` が workerd で使えるかには頼らない)。
+ *  - 例外のメッセージ・URL・本文は残さない(失敗は分類名だけ)。**判定にだけ**読む: 例外の message(`internal error`・`Network connection lost` の 2 つ)・403 の `server` ヘッダと本文の先頭 2KB(配信の防御の拒否の目印)・
+ *    小さい本文の `error code: NNNN`(Cloudflare 自身のエラー応答)。読んだ結果は固定の語({@link JraFailKind}。Issue #804)に写し、`JraFetched.failKind` に載せる。Shift_JIS は `iconv-lite` で読む(`TextDecoder("shift_jis")` が workerd で使えるかには頼らない)。
  * このファイルは **fetch 関数を呼ぶ部品**(`fetchOne`)を持つが、グローバルの `fetch` そのものは呼ばない(注入された関数を呼ぶだけ)。取得の起点は使う側が持つ。
  */
 import iconv from "iconv-lite";
+import { classifyHttpFailure, classifyThrownKind, type JraFailKind } from "./jra-fail-detail";
 
 export const JRA_CUSHION_URL = "https://www.jra.go.jp/keiba/baba/_data_cushion.html";
 export const JRA_MOIST_URL = "https://www.jra.go.jp/keiba/baba/_data_moist.html";
@@ -76,6 +78,11 @@ export interface JraFetchSummary {
 }
 
 export interface JraFetched {
+  /**
+   * 失敗の種類(Issue #804。固定の語。`summary.status` の 4 語・HTTP の状態とは別に、より細かい種類を運ぶ)。2xx の応答は null。
+   * 例外・読み出しの失敗は `dns`・`reset`・`timeout`・`unknown`、3xx は `redirect`、本文の上限超えは `too-large`、HTTP の失敗は `blocked`・`cf-NNNN`・`http`。
+   */
+  readonly failKind: JraFailKind | null;
   readonly summary: JraFetchSummary;
   /** 本文のバイト列(読めたときだけ)。 */
   readonly body: Uint8Array | null;
@@ -88,7 +95,10 @@ export function classifyThrown(error: unknown): "timeout" | "network" {
 }
 
 class ReadFailure extends Error {
-  constructor(readonly failure: "timeout" | "network" | "too-large") {
+  constructor(
+    readonly failure: "timeout" | "network" | "too-large",
+    readonly kind: JraFailKind,
+  ) {
     super(failure);
   }
 }
@@ -98,7 +108,7 @@ async function readBytes(response: Response, maxBytes: number): Promise<Uint8Arr
   const declared = Number(response.headers.get("content-length"));
   if (response.headers.get("content-length") !== null && Number.isFinite(declared) && declared > maxBytes) {
     void response.body?.cancel().catch(() => undefined);
-    throw new ReadFailure("too-large");
+    throw new ReadFailure("too-large", "too-large");
   }
   if (response.body === null) {
     return new Uint8Array(0);
@@ -115,7 +125,7 @@ async function readBytes(response: Response, maxBytes: number): Promise<Uint8Arr
       total += value.byteLength;
       if (total > maxBytes) {
         void reader.cancel().catch(() => undefined);
-        throw new ReadFailure("too-large");
+        throw new ReadFailure("too-large", "too-large");
       }
       chunks.push(value);
     }
@@ -123,7 +133,7 @@ async function readBytes(response: Response, maxBytes: number): Promise<Uint8Arr
     if (error instanceof ReadFailure) {
       throw error;
     }
-    throw new ReadFailure(classifyThrown(error));
+    throw new ReadFailure(classifyThrown(error), classifyThrownKind(error));
   }
   const all = new Uint8Array(total);
   let offset = 0;
@@ -138,8 +148,8 @@ export function cap(text: string, limit: number): string {
   return text.length > limit ? text.slice(0, limit) : text;
 }
 
-function failed(status: JraFailure, httpStatus: number | null, contentType: string | null): JraFetched {
-  return { summary: { status, httpStatus, bytes: null, contentType, ok: false }, body: null };
+function failed(status: JraFailure, httpStatus: number | null, contentType: string | null, failKind: JraFailKind): JraFetched {
+  return { failKind, summary: { status, httpStatus, bytes: null, contentType, ok: false }, body: null };
 }
 
 /** 1 本を取る。例外は投げない(失敗は分類名に落とす)。`ok` はここでは false で、呼び出し側が本文の形を見て決める。 */
@@ -156,20 +166,21 @@ export async function fetchOne(
   try {
     response = await fetchFn(url, { ...init, redirect: "manual", signal });
   } catch (error) {
-    return failed(classifyThrown(error), null, null);
+    return failed(classifyThrown(error), null, null, classifyThrownKind(error));
   }
   const httpStatus = response.status;
   const rawType = response.headers.get("content-type");
   const contentType = rawType === null ? null : cap(rawType, MAX_CONTENT_TYPE_CHARS);
   if (httpStatus >= 300 && httpStatus < 400) {
     void response.body?.cancel().catch(() => undefined);
-    return failed("redirect", httpStatus, contentType);
+    return failed("redirect", httpStatus, contentType, "redirect");
   }
   try {
     const body = await readBytes(response, maxBytes);
-    return { summary: { status: httpStatus, httpStatus, bytes: body.byteLength, contentType, ok: false }, body };
+    const failKind = httpStatus >= 200 && httpStatus < 300 ? null : classifyHttpFailure(httpStatus, response.headers.get("server"), body);
+    return { failKind, summary: { status: httpStatus, httpStatus, bytes: body.byteLength, contentType, ok: false }, body };
   } catch (error) {
-    return failed(error instanceof ReadFailure ? error.failure : "network", httpStatus, contentType);
+    return error instanceof ReadFailure ? failed(error.failure, httpStatus, contentType, error.kind) : failed("network", httpStatus, contentType, "unknown");
   }
 }
 
