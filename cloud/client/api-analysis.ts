@@ -83,10 +83,20 @@ export interface AnalysisHorse {
   readonly modelProb?: number | null;
   /** 確率 × 5 分前の単勝(Issue #796。サーバが掛けた値)。5 分前の単勝が無い馬は null。仕様は `modelProb` と同じ。 */
   readonly modelEv?: number | null;
-  /** 別の Worker が返す、馬ごとの補助の値の符号(Issue #800。符号だけを表示する)。`+`・`-`・`0` 以外・キー無しは null。 */
-  readonly modelSign?: "+" | "-" | "0" | null;
+  /** 別の Worker が返す、馬ごとの補助の値(Issue #805。小数 2 桁の値・応答の中での順位・値を持つ馬の数)。形が崩れたもの・キー無しは null。 */
+  readonly modelAux?: { readonly value: number; readonly rank: number; readonly of: number } | null;
   /** その馬のコース別の成績(Issue #802。参考の情報)。サーバが検査して付ける。無い・形が不正な馬は、キーごと無し(パーサは足さない)。 */
   readonly courseFit?: AnalysisCourseFit;
+}
+
+/** 補助の値(Issue #805)。value が有限の数、rank・of が正の整数で rank ≤ of のときだけ。 */
+function parseModelAux(v: unknown): { value: number; rank: number; of: number } | null {
+  if (typeof v !== "object" || v === null || Array.isArray(v)) return null;
+  const r = v as Record<string, unknown>;
+  const { value, rank, of } = r;
+  if (typeof value !== "number" || !Number.isFinite(value) || typeof rank !== "number" || typeof of !== "number") return null;
+  if (!Number.isInteger(rank) || !Number.isInteger(of) || rank < 1 || rank > of) return null;
+  return { value, rank, of };
 }
 
 /** コースの成績の 1 つの集計(Issue #802)。`wins` ≤ `top3` ≤ `runs`。`best` は 1 以上の整数か null(`runs` が 0 なら null)。 */
@@ -400,12 +410,12 @@ function parseHorse(row: unknown): AnalysisHorse | null {
   const marketEdge = parseMarketEdge(row["marketEdge"]);
   // Issue #796: 別の Worker が計算した確率とその掛け算は、有限の数以外(キー無しを含む)は null(補助の表示なので、応答ごと不正にはしない)。
   const modelProb = typeof row["modelProb"] === "number" && Number.isFinite(row["modelProb"]) ? row["modelProb"] : null;
-  const modelSign = row["modelSign"] === "+" || row["modelSign"] === "-" || row["modelSign"] === "0" ? row["modelSign"] : null;
+  const modelAux = parseModelAux(row["modelAux"]);
   const modelEv = typeof row["modelEv"] === "number" && Number.isFinite(row["modelEv"]) ? row["modelEv"] : null;
   // 配列は複製して持つ(応答の本体と配列を共有しない)。
   // Issue #802: コースの成績は、形が不正ならキーごと無し(欄が無い応答と区別しない。補助の表示なので応答ごと不正にはしない)。
   const courseFit = parseCourseFit(row["courseFit"]);
-  return { umaban, name, prior, adjustedProb, placeOddsMin, ev, isPositive, mark, markFrom, reason, highlights: [...highlights], concerns: [...concerns], winProb, fairWinOdds, winOdds, fairPlaceOdds, actualPlaceOddsMin, actualPlaceOddsMax, earlyPos, latePos, legStyle, timeIndexLine, marketEdge, modelProb, modelEv, modelSign, ...(courseFit === null ? {} : { courseFit }) };
+  return { umaban, name, prior, adjustedProb, placeOddsMin, ev, isPositive, mark, markFrom, reason, highlights: [...highlights], concerns: [...concerns], winProb, fairWinOdds, winOdds, fairPlaceOdds, actualPlaceOddsMin, actualPlaceOddsMax, earlyPos, latePos, legStyle, timeIndexLine, marketEdge, modelProb, modelEv, modelAux, ...(courseFit === null ? {} : { courseFit }) };
 }
 
 /** LLM の呼び出し1件。許可したキーだけを写す(余計なキーは持ち込まない)。どれか1つでも型が違えば null。 */

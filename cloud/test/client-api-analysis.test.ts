@@ -174,7 +174,7 @@ const ALLOCATION = {
     { betType: "wide", comboKey: "0102", stake: 200, odds: null, ev: null },
   ],
 };
-const HORSE = { umaban: 1, name: "アルファ", prior: 0.2, adjustedProb: 0.18, placeOddsMin: 1.8, ev: 1.05, isPositive: true, mark: "◎", markFrom: null, reason: "根拠", highlights: ["追い切り好時計", "内枠有利"], concerns: ["距離延長"], winProb: 0.12, fairWinOdds: 6.7, winOdds: 8.4, fairPlaceOdds: 2.1, actualPlaceOddsMin: 1.5, actualPlaceOddsMax: 2.3, earlyPos: 0.25, latePos: 0.6, legStyle: "差し" as const, timeIndexLine: null, marketEdge: null, modelProb: null, modelEv: null, modelSign: null };
+const HORSE = { umaban: 1, name: "アルファ", prior: 0.2, adjustedProb: 0.18, placeOddsMin: 1.8, ev: 1.05, isPositive: true, mark: "◎", markFrom: null, reason: "根拠", highlights: ["追い切り好時計", "内枠有利"], concerns: ["距離延長"], winProb: 0.12, fairWinOdds: 6.7, winOdds: 8.4, fairPlaceOdds: 2.1, actualPlaceOddsMin: 1.5, actualPlaceOddsMax: 2.3, earlyPos: 0.25, latePos: 0.6, legStyle: "差し" as const, timeIndexLine: null, marketEdge: null, modelProb: null, modelEv: null, modelAux: null };
 const RACE = { venueName: "福島", raceNumber: 11, raceName: "テストステークス", startTime: "15:45", courseType: "芝", distance: 1800, weather: "晴", trackCondition: "良", oddsStatus: "result", placeBasis: "top3" };
 const ANALYSIS = { id: 7, raceId: "202603020211", analyzedAt: "2026-06-28T05:00:00.000Z", kaisaiDate: "20260628", evEstimated: false, model: null, promptVersion: null, llmNote: null, llmCalls: null, race: RACE, horses: [HORSE], allocation: ALLOCATION, detail: "present" };
 const wrap = (analysis: unknown) => ({ ok: true, analysis });
@@ -773,14 +773,17 @@ describe("暫定の確率・補助の符号(Issue #800)のパース", () => {
     const result = parseAnalysisResponse(200, wrap(analysis));
     return result.ok ? result.analysis.modelStage : "unexpected";
   };
-  it("modelSign: + - 0 だけを読む。キー無し・null・ほかの値(数・文字列・<b>)は null", () => {
-    expect(readHorse({ modelSign: "+" })).toMatchObject({ modelSign: "+" });
-    expect(readHorse({ modelSign: "-" })).toMatchObject({ modelSign: "-" });
-    expect(readHorse({ modelSign: "0" })).toMatchObject({ modelSign: "0" });
-    expect(readHorse({})).toMatchObject({ modelSign: null });
-    expect(readHorse({ modelSign: null })).toMatchObject({ modelSign: null });
-    for (const v of [1, -1, 0, "＋", "plus", "<b>+</b>", "+ ", true]) {
-      expect(readHorse({ modelSign: v })).toMatchObject({ modelSign: null });
+  it("modelAux: value(有限の数)・rank・of(正の整数で rank ≤ of)が揃うものだけ読む。キー無し・null・崩れたものは null", () => {
+    expect(readHorse({ modelAux: { value: 0.42, rank: 2, of: 16 } })).toMatchObject({ modelAux: { value: 0.42, rank: 2, of: 16 } });
+    expect(readHorse({ modelAux: { value: -0.15, rank: 14, of: 16 } })).toMatchObject({ modelAux: { value: -0.15, rank: 14, of: 16 } });
+    expect(readHorse({})).toMatchObject({ modelAux: null });
+    expect(readHorse({ modelAux: null })).toMatchObject({ modelAux: null });
+    const bad: unknown[] = [
+      "+", 1, [], { value: "1", rank: 1, of: 1 }, { value: Number.NaN, rank: 1, of: 1 }, { value: 0.1, rank: 0, of: 1 }, { value: 0.1, rank: 1.5, of: 2 },
+      { value: 0.1, rank: 3, of: 2 }, { value: 0.1, rank: 1, of: 0 }, { value: 0.1, rank: 1 }, { rank: 1, of: 1 }, { value: 0.1, rank: "1", of: 1 },
+    ];
+    for (const v of bad) {
+      expect(readHorse({ modelAux: v })).toMatchObject({ modelAux: null });
     }
   });
   it("modelStage: final・preday・provisional だけを読む。キー無し・null・ほかの値は null", () => {

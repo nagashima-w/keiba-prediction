@@ -447,7 +447,7 @@ function horseTable(content: ResultContent, table: HorseTable, actions: ViewActi
   const hasAdjusted = table.columns.some((c) => c.key === "adjusted");
   const hasMarket = table.columns.some((c) => c.key === "jockey");
   const hasModel = table.columns.some((c) => c.key === "modelProb");
-  const hasSign = table.columns.some((c) => c.key === "modelSign");
+  const hasAux = table.columns.some((c) => c.key === "modelAux");
   const head = table.columns.map((c) =>
     c.sort === null
       ? h("th", {}, [c.label])
@@ -475,7 +475,7 @@ function horseTable(content: ResultContent, table: HorseTable, actions: ViewActi
       h("td", {}, [r.winOdds.actual]),
       h("td", {}, [r.odds]),
       ...(hasMarket ? [marketCell(r.marketEdge.jockey), marketCell(r.marketEdge.trainer)] : []),
-      ...(hasModel ? [h("td", {}, [r.model.prob]), h("td", {}, [r.model.ev]), ...(hasSign ? [h("td", {}, [r.model.sign])] : [])] : []),
+      ...(hasModel ? [h("td", {}, [r.model.prob]), h("td", {}, [r.model.ev]), ...(hasAux ? [h("td", {}, [r.model.aux])] : [])] : []),
     ]);
     // 開いている馬は、その行の直後に詳しい行(id は開閉のボタンの aria-controls と同じ。td は全列にまたがる)。
     return open ? [row, h("tr", { class: "eval-detail", id: `horse-detail-${content.id}-${r.umaban}` }, [h("td", { colspan: String(columnCount) }, [horseDetail(r)])])] : [row];

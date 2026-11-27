@@ -6,7 +6,7 @@
  *  - 理由の表示は固定の語彙だけ({@link MODEL_NONE_LABELS})。外から来た理由の文字列は、語彙に無ければ「理由不明」にし、HTML に入れない。
  *  - 「確率 × 5 分前の単勝」は、本番の `odds_snapshots`(`lead_min = 5`)の単勝と掛ける。5 分前の単勝が無い馬は掛け算だけ null。
  *  - 暫定(Issue #800。`status: "none"` に `stage`・`horses` が付く応答)は「暫定」と区別して出し、応答の `odds_win` で掛ける。`stage`・`odds_source` は固定の表に無ければ暫定の列を出さない(計算なし)。
- *  - 馬ごとの補助の値(`u_mat`)は、別の Worker が返す値で、符号だけを表示する(数値は画面に送らない)。
+ *  - 馬ごとの補助の値(`u_mat`)は、別の Worker が返す値で、小数 2 桁に丸めた値と、そのレースの応答の中での順位・頭数を送る(Issue #805)。
  *  - バインディングが無い・地方のレースのときは null(何も読まない。応答に足さない)。
  *  - コースの参考情報(Issue #802。`course`・各馬の `course_fit`)は、確率の検査とは独立に読む(`./model-course`)。応答そのものが不正(HTTP が 200 でない・race_id の不一致・JSON でない)ときだけ出さない。
  * 純ロジック。`Fetcher`・D1 の読み出し・警告の出口は注入する。
@@ -49,8 +49,12 @@ export const MODEL_ODDS_SOURCE_LABELS = {
 } as const;
 type ModelOddsSource = keyof typeof MODEL_ODDS_SOURCE_LABELS;
 
-/** 別の Worker が返す、馬ごとの補助の値の符号だけを表示する。0 は "0"。 */
-export type ModelSign = "+" | "-" | "0";
+/** 別の Worker が返す、馬ごとの補助の値(Issue #805)。`value` は小数 2 桁に丸めた値、`rank` は応答の中で値の大きい順の順位(同じ値は同じ順位。1,2,2,4)、`of` は値を持つ馬の数。 */
+export interface ModelAux {
+  readonly value: number;
+  readonly rank: number;
+  readonly of: number;
+}
 
 /** 暫定のときだけ持つ材料。`winOdds` は、その計算に使った単勝(正の有限の馬だけ)。 */
 export interface ModelProvisional {
@@ -61,7 +65,7 @@ export interface ModelProvisional {
 }
 
 export type ModelParsed =
-  | { readonly kind: "ok"; readonly stage: ModelStage; readonly probs: ReadonlyMap<number, number>; readonly signs: ReadonlyMap<number, ModelSign>; readonly provisional: ModelProvisional | null }
+  | { readonly kind: "ok"; readonly stage: ModelStage; readonly probs: ReadonlyMap<number, number>; readonly aux: ReadonlyMap<number, ModelAux>; readonly provisional: ModelProvisional | null }
   | { readonly kind: "none"; readonly reason: ModelNoneReason };
 
 const UNAVAILABLE: ModelParsed = { kind: "none", reason: "unavailable" };
@@ -70,15 +74,33 @@ function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === "object" && v !== null && !Array.isArray(v);
 }
 
-function signOf(u: unknown): ModelSign | null {
-  if (typeof u !== "number" || !Number.isFinite(u)) return null;
-  return u > 0 ? "+" : u < 0 ? "-" : "0";
+/** 有限の数だけ受ける(範囲の制限はかけない)。 */
+function auxValueOf(u: unknown): number | null {
+  return typeof u === "number" && Number.isFinite(u) ? u : null;
+}
+
+/** 小数 2 桁に丸める(0.5 の位は絶対値が大きいほうへ)。負の 0 は 0 にする。 */
+function round2(u: number): number {
+  const r = Math.sign(u) * Math.round(Math.abs(u) * 100) / 100;
+  return r === 0 ? 0 : r;
+}
+
+/** 馬番 → 値(丸める前)から、丸めた値・順位(丸める前の値の大きい順。同じ値は同じ順位)・頭数を作る。 */
+function buildAux(raw: ReadonlyMap<number, number>): Map<number, ModelAux> {
+  const out = new Map<number, ModelAux>();
+  const of = raw.size;
+  for (const [umaban, u] of raw) {
+    let greater = 0;
+    for (const v of raw.values()) if (v > u) greater++;
+    out.set(umaban, { value: round2(u), rank: greater + 1, of });
+  }
+  return out;
 }
 
 /** 馬の並びを検証する。1 頭でも外れたら null(全体を捨てる)。`withOdds` のときは単勝の表も作る。 */
-function readHorses(horses: unknown[]): { probs: Map<number, number>; signs: Map<number, ModelSign>; winOdds: Map<number, number> } | null {
+function readHorses(horses: unknown[]): { probs: Map<number, number>; aux: Map<number, ModelAux>; winOdds: Map<number, number> } | null {
   const probs = new Map<number, number>();
-  const signs = new Map<number, ModelSign>();
+  const rawAux = new Map<number, number>();
   const winOdds = new Map<number, number>();
   for (const h of horses) {
     if (!isRecord(h)) return null;
@@ -87,12 +109,12 @@ function readHorses(horses: unknown[]): { probs: Map<number, number>; signs: Map
     if (typeof umaban !== "number" || !Number.isInteger(umaban) || umaban < 1 || probs.has(umaban)) return null;
     if (typeof p !== "number" || !Number.isFinite(p) || p < 0 || p > 1) return null;
     probs.set(umaban, p);
-    const sign = signOf(h["u_mat"]);
-    if (sign !== null) signs.set(umaban, sign);
+    const u = auxValueOf(h["u_mat"]);
+    if (u !== null) rawAux.set(umaban, u);
     const o = h["odds_win"];
     if (typeof o === "number" && Number.isFinite(o) && o > 0) winOdds.set(umaban, o);
   }
-  return { probs, signs, winOdds };
+  return { probs, aux: buildAux(rawAux), winOdds };
 }
 
 /** HTTP の状態と JSON の本文を検証する。`raceId` は求めたレース(応答の `race_id` と一致しなければ unavailable)。 */
@@ -118,7 +140,7 @@ export function parseModelResponse(httpStatus: number, body: unknown, raceId: st
       kind: "ok",
       stage: stage as ProvisionalStage,
       probs: read.probs,
-      signs: read.signs,
+      aux: read.aux,
       provisional: { stage: stage as ProvisionalStage, oddsSource: source as ModelOddsSource, takenAtMs: typeof taken === "number" ? taken : null, winOdds: read.winOdds },
     };
   }
@@ -128,14 +150,14 @@ export function parseModelResponse(httpStatus: number, body: unknown, raceId: st
   }
   const read = readHorses(body["horses"]);
   if (read === null) return UNAVAILABLE;
-  return { kind: "ok", stage: "final", probs: read.probs, signs: read.signs, provisional: null };
+  return { kind: "ok", stage: "final", probs: read.probs, aux: read.aux, provisional: null };
 }
 
-/** 馬ごとのセル。`ev` は 確率 × 単勝(確定は 5 分前の単勝、暫定は応答の単勝。単勝が無ければ null)。`sign` は補助の値の符号(無ければ null)。 */
+/** 馬ごとのセル。`ev` は 確率 × 単勝(確定は 5 分前の単勝、暫定は応答の単勝。単勝が無ければ null)。`aux` は補助の値(Issue #805。無ければ null)。 */
 export interface ModelCell {
   readonly prob: number;
   readonly ev: number | null;
-  readonly sign: ModelSign | null;
+  readonly aux: ModelAux | null;
 }
 
 export interface ModelColumn {
@@ -165,7 +187,7 @@ export function buildModelColumn(parsed: ModelParsed, win5: ReadonlyMap<number, 
   const byUmaban = new Map<number, ModelCell>();
   for (const [umaban, prob] of parsed.probs) {
     const odds = oddsOf?.get(umaban);
-    byUmaban.set(umaban, { prob, ev: odds === undefined ? null : prob * odds, sign: parsed.signs.get(umaban) ?? null });
+    byUmaban.set(umaban, { prob, ev: odds === undefined ? null : prob * odds, aux: parsed.aux.get(umaban) ?? null });
   }
   if (prov !== null) {
     const at = prov.takenAtMs === null ? "" : `(${jstShort(prov.takenAtMs)} 時点)`;
@@ -192,7 +214,7 @@ export function attachModel<V extends Pick<AnalysisView, "horses">>(view: V, col
     ...view,
     horses: view.horses.map((h) => {
       const cell = column.byUmaban.get(h.umaban);
-      return { ...h, modelProb: cell?.prob ?? null, modelEv: cell?.ev ?? null, modelSign: cell?.sign ?? null };
+      return { ...h, modelProb: cell?.prob ?? null, modelEv: cell?.ev ?? null, modelAux: cell?.aux ?? null };
     }),
     modelStatus: column.status,
     modelStage: column.stage,

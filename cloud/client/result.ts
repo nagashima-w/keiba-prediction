@@ -146,7 +146,7 @@ export interface HorseCard {
   /** 騎手・調教師の指標のセル(Issue #643)。 */
   readonly marketEdge: HorseMarketCells;
   /** 別の Worker が計算した確率と、確率 × 5 分前の単勝のセル(Issue #796)。値が無い馬は「—」。列を出すかは `HorseTable.columns`。 */
-  readonly model: { readonly prob: string; readonly ev: string; /** 補助の値の符号(Issue #800)。＋ − 0、無ければ「—」。 */ readonly sign: string };
+  readonly model: { readonly prob: string; readonly ev: string; /** 補助の値(Issue #805)。`＋0.42(2位/16頭)` の形(負は全角の −、0.00 は符号なし)。無ければ「—」。 */ readonly aux: string };
   /** コース別の成績の文(Issue #802。参考の情報)。欄の無い馬は null。画面は詳しい中身のタイム指数の行の下に出す。 */
   readonly courseFit: CourseFitLines | null;
   readonly umaban: number;
@@ -228,7 +228,7 @@ export function nextHorseSort(current: HorseSort, key: HorseSortKey): HorseSort 
 
 /** 馬ごとの評価の表の列(Issue #546-2)。`sort` が null の列(印・馬名)は並べ替えられない(ボタンにしない)。 */
 export interface HorseTableColumn {
-  readonly key: "mark" | "name" | "jockey" | "trainer" | "modelProb" | "modelEv" | "modelSign" | HorseSortKey;
+  readonly key: "mark" | "name" | "jockey" | "trainer" | "modelProb" | "modelEv" | "modelAux" | HorseSortKey;
   readonly label: string;
   readonly sort: {
     readonly ariaSort: "ascending" | "descending" | "none";
@@ -482,6 +482,13 @@ function probShiftOf(prior: number, adjusted: number): string | null {
   return signedPtText(adjusted - prior);
 }
 
+/** 補助の値の表示(Issue #805)。`+0.42(2位/16頭)`。負は全角の −。丸めて 0.00 になるものは符号なし。 */
+export function formatModelAux(a: { value: number; rank: number; of: number }): string {
+  const abs = Math.abs(a.value).toFixed(2);
+  const sign = a.value > 0 && abs !== "0.00" ? "+" : a.value < 0 && abs !== "0.00" ? "−" : "";
+  return `${sign}${abs}(${a.rank}位/${a.of}頭)`;
+}
+
 /** 確率の差(0〜1 のスケール)を「+3.0pt」「-1.3pt」にする。丸めて 0.0 になる差は「±0.0pt」(補正幅と同じ)。 */
 export function signedPtText(diff: number): string {
   const text = formatAdjustment(diff);
@@ -612,7 +619,7 @@ function horseTableOf(horses: readonly HorseCard[], llmEffective: boolean, oddsS
       ? [
           { key: "modelProb" as const, label: provisional ? "確率(暫定)" : "確率(別計算)", sort: null },
           { key: "modelEv" as const, label: provisional ? "確率×単勝(暫定)" : "確率×5分前単勝", sort: null },
-          ...(horses.some((x) => x.model.sign !== NO_MARKET_VALUE) ? [{ key: "modelSign" as const, label: provisional ? "補助(暫定)" : "補助(別計算)", sort: null }] : []),
+          ...(horses.some((x) => x.model.aux !== NO_MARKET_VALUE) ? [{ key: "modelAux" as const, label: provisional ? "補助(暫定)" : "補助(別計算)", sort: null }] : []),
         ]
       : []),
   ];
@@ -658,7 +665,7 @@ export function contentOf(a: AnalysisDetail, readOnly = false, notesOpen = false
     timeIndexLine: h.timeIndexLine ?? null,
     marketEdge: h.marketEdge == null ? { jockey: EMPTY_MARKET_CELL, trainer: EMPTY_MARKET_CELL } : { jockey: marketCellOf(h.marketEdge.jockey), trainer: marketCellOf(h.marketEdge.trainer) },
     courseFit: courseFitLinesOf(h.courseFit),
-    model: { prob: h.modelProb == null ? NO_MARKET_VALUE : formatPercent(h.modelProb), ev: h.modelEv == null ? NO_MARKET_VALUE : formatEv(h.modelEv), sign: h.modelSign === "+" ? "＋" : h.modelSign === "-" ? "−" : h.modelSign === "0" ? "0" : NO_MARKET_VALUE },
+    model: { prob: h.modelProb == null ? NO_MARKET_VALUE : formatPercent(h.modelProb), ev: h.modelEv == null ? NO_MARKET_VALUE : formatEv(h.modelEv), aux: h.modelAux == null ? NO_MARKET_VALUE : formatModelAux(h.modelAux) },
     sortValues: {
       prior: finiteOrNull(h.prior),
       adjusted: llmEffective ? finiteOrNull(h.adjustedProb) : null,

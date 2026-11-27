@@ -89,19 +89,19 @@ describe("buildModelColumn(確率 × 5 分前の単勝)", () => {
   it("確率 × 単勝 を馬ごとに掛ける", () => {
     const col = buildModelColumn(ok, new Map([[1, 8], [2, 3]]));
     expect(col.status).toBe("ok");
-    expect(col.byUmaban.get(1)).toEqual({ prob: 0.25, ev: 2, sign: null });
-    expect(col.byUmaban.get(2)).toEqual({ prob: 0.5, ev: 1.5, sign: null });
+    expect(col.byUmaban.get(1)).toEqual({ prob: 0.25, ev: 2, aux: null });
+    expect(col.byUmaban.get(2)).toEqual({ prob: 0.5, ev: 1.5, aux: null });
   });
 
   it("5 分前の単勝が無い馬は確率だけで掛け算は null", () => {
     const col = buildModelColumn(ok, new Map([[1, 8]]));
-    expect(col.byUmaban.get(1)).toEqual({ prob: 0.25, ev: 2, sign: null });
-    expect(col.byUmaban.get(2)).toEqual({ prob: 0.5, ev: null, sign: null });
+    expect(col.byUmaban.get(1)).toEqual({ prob: 0.25, ev: 2, aux: null });
+    expect(col.byUmaban.get(2)).toEqual({ prob: 0.5, ev: null, aux: null });
   });
 
   it("5 分前の記録が無い(null)ときは全馬で掛け算が null。注記に書く", () => {
     const col = buildModelColumn(ok, null);
-    expect(col.byUmaban.get(1)).toEqual({ prob: 0.25, ev: null, sign: null });
+    expect(col.byUmaban.get(1)).toEqual({ prob: 0.25, ev: null, aux: null });
     expect(col.note).toContain("5分前");
   });
 
@@ -131,7 +131,7 @@ describe("attachModel", () => {
   });
 
   it("馬ごとに modelProb・modelEv を足し、無い馬は null。注記と状態は 1 つ", () => {
-    const col: ModelColumn = { status: "ok", stage: "final", note: "注記", byUmaban: new Map([[1, { prob: 0.2, ev: 1.6, sign: null }], [2, { prob: 0.3, ev: null, sign: null }]]) };
+    const col: ModelColumn = { status: "ok", stage: "final", note: "注記", byUmaban: new Map([[1, { prob: 0.2, ev: 1.6, aux: null }], [2, { prob: 0.3, ev: null, aux: null }]]) };
     const out = attachModel(view, col) as unknown as { horses: Record<string, unknown>[]; modelNote: string; modelStatus: string };
     expect(out.modelNote).toBe("注記");
     expect(out.modelStatus).toBe("ok");
@@ -174,7 +174,7 @@ describe("loadModelColumn", () => {
     const col = await loadModelColumn({ model: fetcher, readWinOdds: winOdds }, RACE, () => undefined);
     expect(urls).toEqual([`GET /v1/races/${RACE}`]);
     expect(signals).toEqual([true]);
-    expect(col!.byUmaban.get(1)).toEqual({ prob: 0.25, ev: 2, sign: null });
+    expect(col!.byUmaban.get(1)).toEqual({ prob: 0.25, ev: 2, aux: null });
   });
 
   it("本文が JSON でなければ unavailable", async () => {
@@ -205,7 +205,7 @@ describe("loadModelColumn", () => {
     const { fetcher } = fetcherOf(() => Response.json(okBody()));
     const col = await loadModelColumn({ model: fetcher, readWinOdds: async () => { throw new Error("d1"); } }, RACE, () => undefined);
     expect(col!.status).toBe("ok");
-    expect(col!.byUmaban.get(1)).toEqual({ prob: 0.25, ev: null, sign: null });
+    expect(col!.byUmaban.get(1)).toEqual({ prob: 0.25, ev: null, aux: null });
   });
 
   it("計算なし(none)のときは、列は全馬 —", async () => {
@@ -238,13 +238,13 @@ const provHorses = () => [
 ];
 
 describe("#800 parseModelResponse(暫定)", () => {
-  it("暫定の none は、馬番 → 確率・単勝・符号の表と、段階・オッズの出どころ・時刻にする", () => {
+  it("暫定の none は、馬番 → 確率・単勝・補助(値・順位・頭数)の表と、段階・オッズの出どころ・時刻にする", () => {
     const r = parseModelResponse(200, provBody(provHorses()), RACE);
     expect(r.kind).toBe("ok");
     if (r.kind !== "ok") return;
     expect(r.stage).toBe("provisional");
     expect([...r.probs.entries()]).toEqual([[1, 0.25], [2, 0.5]]);
-    expect([...r.signs.entries()]).toEqual([[1, "+"], [2, "-"]]);
+    expect([...r.aux.entries()]).toEqual([[1, { value: 0.3, rank: 1, of: 2 }], [2, { value: -0.1, rank: 2, of: 2 }]]);
     expect(r.provisional).not.toBeNull();
     expect(r.provisional!.oddsSource).toBe("lead10");
     expect(r.provisional!.takenAtMs).toBe(Date.UTC(2026, 10, 26, 5, 20));
@@ -262,32 +262,56 @@ describe("#800 parseModelResponse(暫定)", () => {
     expect(r.kind === "ok" && r.provisional).toBeNull();
   });
 
-  it("確定(stage final の ok)は符号を読む。u_mat が無い馬は null", () => {
+  it("確定(stage final の ok)は補助を読む。u_mat が無い馬は無し(頭数にも数えない)", () => {
     const body = okBody([{ umaban: 1, p_win: 0.2, u_mat: 1 }, { umaban: 2, p_win: 0.3 }], { stage: "final", odds_source: "lead5", odds_lead_min: 5, odds_taken_at_ms: 1 });
     const r = parseModelResponse(200, body, RACE);
     expect(r.kind).toBe("ok");
     if (r.kind !== "ok") return;
     expect(r.stage).toBe("final");
-    expect(r.signs.get(1)).toBe("+");
-    expect(r.signs.has(2)).toBe(false);
+    expect(r.aux.get(1)).toEqual({ value: 1, rank: 1, of: 1 });
+    expect(r.aux.has(2)).toBe(false);
   });
 
   it.each([
-    [0.5, "+"],
-    [-0.5, "-"],
-    [0, "0"],
-    [-0, "0"],
-  ])("u_mat %s の符号は %s", (u, sign) => {
+    [0.5, 0.5],
+    [-0.5, -0.5],
+    [0, 0],
+    [-0, 0],
+    [-0.004, 0],
+    [0.004, 0],
+    [0.005, 0.01],
+    [-0.005, -0.01],
+    [0.424, 0.42],
+    [-0.146, -0.15],
+  ])("u_mat %s は小数 2 桁に丸めて %s(負の 0 は 0)", (u, value) => {
     const r = parseModelResponse(200, provBody([{ umaban: 1, p_win: 0.2, odds_win: 5, u_mat: u }]), RACE);
-    expect(r.kind === "ok" && r.signs.get(1)).toBe(sign);
+    expect(r.kind).toBe("ok");
+    const v = r.kind === "ok" ? r.aux.get(1)!.value : NaN;
+    expect(v).toBe(value);
+    expect(Object.is(v, -0)).toBe(false);
   });
 
-  it.each([["文字列", "1"], ["null", null], ["NaN", Number.NaN], ["Infinity", Number.POSITIVE_INFINITY]])("u_mat が %s のとき、その馬の符号だけ無し(全体は捨てない)", (_n, u) => {
+  it("順位は丸める前の値の大きい順。同じ値は同じ順位で次は飛ぶ(1,2,2,4)。丸めて同じでも元が違えば別の順位", () => {
+    const hs = [0.3, 0.1, 0.1, -0.2, 0.004, 0.001].map((u, i) => ({ umaban: i + 1, p_win: 0.1, odds_win: 5, u_mat: u }));
+    const r = parseModelResponse(200, provBody(hs), RACE);
+    expect(r.kind).toBe("ok");
+    if (r.kind !== "ok") return;
+    expect([...r.aux.values()].map((a) => a.rank)).toEqual([1, 2, 2, 6, 4, 5]);
+    expect([...r.aux.values()].map((a) => a.of)).toEqual([6, 6, 6, 6, 6, 6]);
+    expect([...r.aux.values()].map((a) => a.value)).toEqual([0.3, 0.1, 0.1, -0.2, 0, 0]);
+  });
+
+  it("値のある馬が 1 頭だけなら 1位/1頭。u_mat の無い馬・有限でない馬は順位にも頭数にも入らない", () => {
+    const r = parseModelResponse(200, provBody([{ umaban: 1, p_win: 0.2, odds_win: 5, u_mat: -3 }, { umaban: 2, p_win: 0.2, odds_win: 5 }, { umaban: 3, p_win: 0.2, odds_win: 5, u_mat: Number.NaN }]), RACE);
+    expect(r.kind === "ok" && [...r.aux.entries()]).toEqual([[1, { value: -3, rank: 1, of: 1 }]]);
+  });
+
+  it.each([["文字列", "1"], ["null", null], ["NaN", Number.NaN], ["Infinity", Number.POSITIVE_INFINITY]])("u_mat が %s のとき、その馬の補助だけ無し(全体は捨てない)", (_n, u) => {
     const r = parseModelResponse(200, provBody([{ umaban: 1, p_win: 0.2, odds_win: 5, u_mat: u }, { umaban: 2, p_win: 0.2, odds_win: 5, u_mat: 1 }]), RACE);
     expect(r.kind).toBe("ok");
     if (r.kind !== "ok") return;
-    expect(r.signs.has(1)).toBe(false);
-    expect(r.signs.get(2)).toBe("+");
+    expect(r.aux.has(1)).toBe(false);
+    expect(r.aux.get(2)).toEqual({ value: 1, rank: 1, of: 1 });
   });
 
   it.each([
@@ -368,8 +392,8 @@ describe("#800 buildModelColumn(暫定)", () => {
     const col = buildModelColumn(prov(), new Map([[1, 100], [2, 100]]));
     expect(col.status).toBe("ok");
     expect(col.stage).toBe("provisional");
-    expect(col.byUmaban.get(1)).toEqual({ prob: 0.25, ev: 2, sign: "+" });
-    expect(col.byUmaban.get(2)).toEqual({ prob: 0.5, ev: 1.5, sign: "-" });
+    expect(col.byUmaban.get(1)).toEqual({ prob: 0.25, ev: 2, aux: { value: 0.3, rank: 1, of: 2 } });
+    expect(col.byUmaban.get(2)).toEqual({ prob: 0.5, ev: 1.5, aux: { value: -0.1, rank: 2, of: 2 } });
   });
 
   it("暫定は 5 分前の記録が無い(null)でも掛ける", () => {
@@ -378,15 +402,15 @@ describe("#800 buildModelColumn(暫定)", () => {
 
   it("暫定: odds_win が正でない馬は掛け算だけ空欄", () => {
     const col = buildModelColumn(prov({}, [{ umaban: 1, p_win: 0.25, odds_win: 0, u_mat: 1 }, { umaban: 2, p_win: 0.5, odds_win: 3 }]), null);
-    expect(col.byUmaban.get(1)).toEqual({ prob: 0.25, ev: null, sign: "+" });
-    expect(col.byUmaban.get(2)).toEqual({ prob: 0.5, ev: 1.5, sign: null });
+    expect(col.byUmaban.get(1)).toEqual({ prob: 0.25, ev: null, aux: { value: 1, rank: 1, of: 1 } });
+    expect(col.byUmaban.get(2)).toEqual({ prob: 0.5, ev: 1.5, aux: null });
   });
 
-  it("確定は今までどおり 5 分前の単勝で掛け、符号を持つ", () => {
+  it("確定は今までどおり 5 分前の単勝で掛け、補助を持つ", () => {
     const p = parseModelResponse(200, okBody([{ umaban: 1, p_win: 0.25, u_mat: -2 }]), RACE);
     const col = buildModelColumn(p, new Map([[1, 8]]));
     expect(col.stage).toBe("final");
-    expect(col.byUmaban.get(1)).toEqual({ prob: 0.25, ev: 2, sign: "-" });
+    expect(col.byUmaban.get(1)).toEqual({ prob: 0.25, ev: 2, aux: { value: -2, rank: 1, of: 1 } });
   });
 
   it("計算なしの列の stage は null", () => {
@@ -429,13 +453,18 @@ describe("#800 buildModelColumn(暫定)", () => {
   });
 });
 
-describe("#800 attachModel(暫定・符号)", () => {
+describe("#800 attachModel(暫定・補助)", () => {
   const view = { id: 1, horses: [{ umaban: 1 }, { umaban: 2 }] } as never;
-  it("馬ごとに modelSign、全体に modelStage を足す", () => {
-    const col: ModelColumn = { status: "ok", stage: "provisional", note: "n", byUmaban: new Map([[1, { prob: 0.2, ev: 1, sign: "+" }]]) };
+  it("馬ごとに modelAux、全体に modelStage を足す", () => {
+    const col: ModelColumn = { status: "ok", stage: "provisional", note: "n", byUmaban: new Map([[1, { prob: 0.2, ev: 1, aux: { value: 0.2, rank: 1, of: 3 } }]]) };
     const out = attachModel(view, col) as unknown as { horses: Record<string, unknown>[]; modelStage: string };
     expect(out.modelStage).toBe("provisional");
-    expect(out.horses.map((h) => h["modelSign"])).toEqual(["+", null]);
+    expect(out.horses.map((h) => h["modelAux"])).toEqual([{ value: 0.2, rank: 1, of: 3 }, null]);
+  });
+  it("表に無い馬番の値も順位・頭数に数える(画面に出るのは表の馬だけ)", () => {
+    const p = parseModelResponse(200, okBody([{ umaban: 1, p_win: 0.2, u_mat: 0.1 }, { umaban: 2, p_win: 0.2, u_mat: 0.5 }, { umaban: 9, p_win: 0.2, u_mat: 0.9 }]), RACE);
+    const out = attachModel(view, buildModelColumn(p, null)) as unknown as { horses: Record<string, unknown>[] };
+    expect(out.horses.map((h) => h["modelAux"])).toEqual([{ value: 0.1, rank: 3, of: 3 }, { value: 0.5, rank: 2, of: 3 }]);
   });
   it("計算なしは modelStage が null", () => {
     const col: ModelColumn = { status: "none", stage: null, note: "n", byUmaban: new Map() };
@@ -561,7 +590,7 @@ describe("コースの参考情報(Issue #802)", () => {
       const { fetcher, urls } = fetcherOf(() => Response.json(withCourse()));
       const r = await loadModelResult({ model: fetcher, readWinOdds: winOdds }, RACE, () => undefined);
       expect(urls).toEqual([`GET /v1/races/${RACE}`]);
-      expect(r!.column.byUmaban.get(1)).toEqual({ prob: 0.25, ev: 2, sign: null });
+      expect(r!.column.byUmaban.get(1)).toEqual({ prob: 0.25, ev: 2, aux: null });
       expect(r!.course!.course!.name).toBe("東京 芝1600");
     });
 
