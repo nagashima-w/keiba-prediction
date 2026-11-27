@@ -73,7 +73,14 @@ export type RacesResult = { readonly ok: true; readonly races: RaceRow[] } | { r
 export type RaceStatusResult =
   | { readonly ok: true; readonly rows: BoardRow[]; readonly prior: MorningPriorView | null }
   | { readonly ok: false; readonly error: ApiFailure };
-export type BoardResult = { readonly ok: true; readonly rows: BoardRow[] } | { readonly ok: false; readonly error: ApiFailure };
+/** DO の拠点(Issue #812。管理者の板の応答だけ)。`day` は確認した日(JST の YYYYMMDD)。 */
+export interface ColoView {
+  readonly colo: string;
+  readonly day: string;
+}
+
+/** `colo` は、応答にキーが無い(閲覧者・古いサーバ)なら無し、キーがあって値が取れていない・形違いなら null。 */
+export type BoardResult = { readonly ok: true; readonly rows: BoardRow[]; readonly colo?: ColoView | null } | { readonly ok: false; readonly error: ApiFailure };
 
 /** 使う部分だけの fetch(`window.fetch` が満たす。Node のテストでは偽物を渡せる)。 */
 export type FetchLike = (
@@ -188,7 +195,16 @@ export function parseRacesResponse(status: number, body: unknown): RacesResult {
 }
 
 export function parseStatusResponse(status: number, body: unknown): BoardResult {
-  return parseRows(status, body, parseBoardRow);
+  const result = parseRows(status, body, parseBoardRow);
+  if (!result.ok || !isRecord(body) || !("colo" in body)) return result;
+  return { ...result, colo: parseColo(body["colo"]) };
+}
+
+/** 板の応答の `colo`(Issue #812)。形が違えば null(板の行は壊さない)。 */
+function parseColo(value: unknown): ColoView | null {
+  if (!isRecord(value)) return null;
+  const { colo, day } = value;
+  return typeof colo === "string" && /^[A-Z]{3}$/.test(colo) && typeof day === "string" && /^\d{8}$/.test(day) ? { colo, day } : null;
 }
 
 /**

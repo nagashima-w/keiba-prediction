@@ -112,3 +112,22 @@ describe("一覧の上の並び: 2 つの塊(Issue #560)", () => {
     expect(classOf(t.children![1] as VNode)).toBe("next-races");
   });
 });
+
+describe("Issue #812: DO の拠点の行(管理者の応答にある値だけ)", () => {
+  const ready = { kind: "ready" as const, rows: [{ raceId: "202603020211", mode: "morning" as const, status: "done" as const, attempts: 0, error: null, queuedAt: 1, updatedAt: 2, prior: false, analysisId: null }] };
+  const lines = (t: VNode): VNode[] => findAll(t, (n) => classOf(n).split(" ").includes("do-colo"));
+  it("値があれば、controls の直後に class に meta を持つ行を 1 つ出す", () => {
+    const t = tree({ board: ready, colo: { colo: "NRT", day: "20261101" } });
+    const found = lines(t);
+    expect(found).toHaveLength(1);
+    expect(textOf(found[0]!)).toBe("DO の拠点: NRT 成田(11/1 に確認)");
+    expect(classOf(found[0]!).split(" ")).toContain("meta");
+    expect((t.children ?? []).indexOf(found[0]!)).toBe(1); // controls(0)の直後
+  });
+  it("値が無い(閲覧者)ときは行が無い", () => {
+    expect(lines(tree({ board: ready }))).toHaveLength(0);
+  });
+  it("未確認の行", () => {
+    expect(textOf(lines(tree({ board: ready, colo: null }))[0]!)).toBe("DO の拠点: 未確認");
+  });
+});

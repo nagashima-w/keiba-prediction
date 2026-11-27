@@ -330,7 +330,9 @@ describe("生成物のドリフトと決定性", () => {
     // (追記)Issue #806(レースの画面の「事前分析」の下に、別の Worker の確率の表・各馬のコース成績・コースの欄を出す節): 上限は 261,000 から 264,000 へ引き上げた。
     // 実測(`Buffer.byteLength(CLIENT_JS)`)は 260,426(633bd960 のコミット済みの生成物)→ 263,275(+2,849。`pnpm run build:client` の出力〈「263275 バイト」〉)。計り方は上と同じ式。新しい上限 264,000 の余裕は 264,000 - 263,275 = 725 バイト。
     // 増えたのは `api-analysis.ts` の塊の検査(`parseRaceModelBlock`・`fetchRaceStatusWithModel`)、`race.ts` の節の組み立て、`view.ts` の節、日本語の文言(`\u` エスケープ)。新しい部品・色は足していない。
-    expect(Buffer.byteLength(CLIENT_JS)).toBeLessThan(264_000);
+    // (追記)Issue #812(一覧に「DO の拠点: NRT 成田(11/28 に確認)」の 1 行を出す。管理者の板の応答の colo の検査・日付ごとの保持・文言・都市名の表 `src/colo-city.ts`): 上限は 264,000 から 266,000 へ引き上げた。
+    // 実測(`Buffer.byteLength(CLIENT_JS)`)は 263,275(基点 4a783238 のコミット済みの生成物)→ 264,899(+1,624。`pnpm run build:client` の出力〈「264899 バイト」〉)。新しい上限 266,000 の余裕は 266,000 - 264,899 = 1,101 バイト。
+    expect(Buffer.byteLength(CLIENT_JS)).toBeLessThan(266_000);
   });
 });
 

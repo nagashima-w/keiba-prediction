@@ -381,3 +381,37 @@ describe("createRaceData: route と画面の判定は依存から受け取る", 
     expect(f.data.trackingNotice()).toBeNull();
   });
 });
+
+describe("createRaceData: 拠点(colo。Issue #812)は板の応答から日付ごとに持つ", () => {
+  it("板の応答の colo を coloOf(date) で返す。キーが無い応答(閲覧者)は undefined。取得前も undefined", async () => {
+    const f = fixture();
+    expect(f.data.coloOf(DATE)).toBeUndefined();
+    f.replies.set(RACES_URL, () => ok(racesBody));
+    f.replies.set(BOARD_URL, () => ok({ ok: true, kaisai_date: DATE, races: [], colo: { colo: "NRT", day: "20261128" } }));
+    f.data.ensureList(DATE, "central");
+    await Promise.all(f.data.pending());
+    expect(f.data.coloOf(DATE)).toEqual({ colo: "NRT", day: "20261128" });
+    expect(f.data.coloOf("20260629")).toBeUndefined();
+  });
+  it("閲覧者の応答(colo のキー無し)では undefined のまま", async () => {
+    const f = fixture();
+    f.replies.set(RACES_URL, () => ok(racesBody));
+    f.replies.set(BOARD_URL, () => ok({ ok: true, kaisai_date: DATE, races: [] }));
+    f.data.ensureList(DATE, "central");
+    await Promise.all(f.data.pending());
+    expect(f.data.coloOf(DATE)).toBeUndefined();
+  });
+  it("「更新」の板の再取得で colo が変われば、新しい値になる", async () => {
+    const f = fixture();
+    let colo: unknown = null;
+    f.replies.set(RACES_URL, () => ok(racesBody));
+    f.replies.set(BOARD_URL, () => ok({ ok: true, kaisai_date: DATE, races: [], colo }));
+    f.data.ensureList(DATE, "central");
+    await Promise.all(f.data.pending());
+    expect(f.data.coloOf(DATE)).toBeNull();
+    colo = { colo: "KIX", day: "20261129" };
+    f.data.refreshList(DATE, "central");
+    await Promise.all(f.data.pending());
+    expect(f.data.coloOf(DATE)).toEqual({ colo: "KIX", day: "20261129" });
+  });
+});
