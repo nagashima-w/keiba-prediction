@@ -48,6 +48,7 @@ describe("DO の stub は doStub の外で作らない", () => {
     expect(names.length).toBeGreaterThanOrEqual(10);
     expect(names).toContain("RACE_DAY");
     expect(names).toContain("NETKEIBA_GATE");
+    expect(names).toContain("JRA_FETCH_PROXY"); // Issue #815: 中継の DO も同じ入口(doStub)で作る
     expect(files.length).toBeGreaterThan(50);
   });
 

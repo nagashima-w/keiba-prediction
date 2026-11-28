@@ -2953,6 +2953,13 @@ JRA の「過去の含水率・クッション値」(`https://www.jra.go.jp/keib
   読み直しは R2 の控えを読み(`getPdf`)、パーサに通して `savePdf(pdf: null)` で書き直す(JRA には行かず、R2 に PUT せず、`r2_key` は COALESCE で保つ)。R2 に控えが無ければ何も書かず積みから外す。取り直しは、200 なら通常どおり読んで書き(R2 に控えを置き、`http-403` の記録を上書き)、403 がまた出たら回数を足して次の JST 18:00 以降に回す。**3 回(3 晩)続いたら積みから外して恒久**(D1 は `http-403` のまま)。404 などの恒久の失敗はその分類で記録を上書きし、一時的な失敗(timeout・5xx など)は記録せず取り直す。取り直しの日を待つ間は `finished` にならない(`waitReason` が `redo-wait`)。進み具合の `redo` は、済んでいない読み直し・取り直しの数。間隔(3 秒以上)・1 日の上限(500 行)・時間帯・UA は今のまま。D1 の書き込みの見積もりは約 220 行(migration は不要)。
 - **テスト**: `jra-baba-past-pdf`(実物 11 本と合成の PDF。書式の違い・境界・壊れた入力・CMap の爆弾・誤植 `8..8` の条件)・`jra-baba-past-links`・`jra-baba-past-fetch`・`jra-baba-past-backfill-core`(偽の取得・本物の SQLite)・`baba-past-repository.integration`(ローカルの D1・R2)・`handler-baba-past`・`scheduled-jra-baba-past`・`cloud-config-guard`(取得口・SQL・止める var・binding の固定)・`cloud-d1-schema`。
 
+### クラウド版の JRA への取得の中継(#815。var `JRA_FETCH_VIA_PROXY` が "1" のときだけ使う。**版数は 1.44.0 のまま**・`PROMPT_VERSION` も変えない)
+- **目的**: 開催日の DO はアムステルダムに置かれ、JRA の公式サイトへの取得が手前の防御に 403 で弾かれた(#804)。DO は作られた拠点に固定されるので、JRA への取得だけを、アジア太平洋の希望(`locationHint: "apac"`。#811 の `doStub`)で新しく作った別の小さな DO `JraFetchProxy`(単一インスタンス・固定名 `main`。migration v19・binding `JRA_FETCH_PROXY`)から出す。
+- **通すもの**: 開催日の DO の、馬場の取得・発走前のオッズの取得(オッズの記録を含む)・拠点の確認(`cdn-cgi/trace`)。この 3 つの fetch の差し込み口を、中継の stub の `fetch` に替える(`resolveJraFetch`)。間隔(`createJraPacer`)・呼ぶ側のタイムアウト・失敗の分類(#804)は、今までどおり開催日の DO 側で動く。出馬表の取得・過去の埋め戻し・netkeiba の取得は変えない。
+- **許可リスト**: 中継は行き先を検査してから外へ出す。許可は JRA の公式サイトのホスト(https。認証情報・ポート指定なし)と、`https://www.cloudflare.com/cdn-cgi/trace`(GET だけ)だけ。ほかは外へ出さず 403、GET・POST 以外のメソッドは 405。リダイレクトは追わず(`redirect: "manual"`)そのまま返す。渡す要求のヘッダは content-type・user-agent・accept・accept-language だけ。応答の状態・ヘッダ・本文は変えずに返す。中継の側でも、今の JRA の取得と同じ上限(`JRA_TIMEOUT_MS`)で切る(応答の待ちと本文の読み出しの合計。超えたら 504、上流の例外は 502)。
+- **戻し方**: `wrangler.toml` の `JRA_FETCH_VIA_PROXY` を "0" にして、承認印つきで公開する(直接の取得に戻る。未設定・"0"・"1" 以外は直接)。"1" でも binding が無い構成では、警告を 1 行出して直接取る。
+- **効くとき**: 中継の DO は公開後に初めて作られるので、apac の希望が効く(希望であって保証ではない。拠点は公開後に利用状況の API で確かめる)。smoke はすべての構成で `JRA_FETCH_VIA_PROXY=0` にして、本物の JRA・cloudflare に出ない。
+
 ### クラウド版の当日の馬場の値の LLM・画面への反映(#295〈#293-B〉。**版数は 1.44.0 のまま**・`PROMPT_VERSION` は "2026-10-13.2")
 
 #294 で D1 の `baba_conditions` に貯めた当日の馬場の値(朝の計測値。取得先は、当時は外部の API で、#478 で JRA のページに替えた)を、発走前の分析の LLM と分析の画面に出す。
