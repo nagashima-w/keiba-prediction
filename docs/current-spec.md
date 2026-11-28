@@ -2956,7 +2956,7 @@ JRA の「過去の含水率・クッション値」(`https://www.jra.go.jp/keib
 ### クラウド版の JRA への取得の中継(#815。var `JRA_FETCH_VIA_PROXY` が "1" のときだけ使う。**版数は 1.44.0 のまま**・`PROMPT_VERSION` も変えない)
 - **目的**: 開催日の DO はアムステルダムに置かれ、JRA の公式サイトへの取得が手前の防御に 403 で弾かれた(#804)。DO は作られた拠点に固定されるので、JRA への取得だけを、アジア太平洋の希望(`locationHint: "apac"`。#811 の `doStub`)で新しく作った別の小さな DO `JraFetchProxy`(単一インスタンス・固定名 `main`。migration v19・binding `JRA_FETCH_PROXY`)から出す。
 - **通すもの**: 開催日の DO の、馬場の取得・発走前のオッズの取得(オッズの記録を含む)・拠点の確認(`cdn-cgi/trace`)。この 3 つの fetch の差し込み口を、中継の stub の `fetch` に替える(`resolveJraFetch`)。間隔(`createJraPacer`)・呼ぶ側のタイムアウト・失敗の分類(#804)は、今までどおり開催日の DO 側で動く。出馬表の取得・過去の埋め戻し・netkeiba の取得は変えない。
-- **許可リスト**: 中継は行き先を検査してから外へ出す。許可は JRA の公式サイトのホスト(https。認証情報・ポート指定なし)と、`https://www.cloudflare.com/cdn-cgi/trace`(GET だけ)だけ。ほかは外へ出さず 403、GET・POST 以外のメソッドは 405。リダイレクトは追わず(`redirect: "manual"`)そのまま返す。渡す要求のヘッダは content-type・user-agent・accept・accept-language だけ。応答の状態・ヘッダ・本文は変えずに返す。中継の側でも、今の JRA の取得と同じ上限(`JRA_TIMEOUT_MS`)で切る(応答の待ちと本文の読み出しの合計。超えたら 504、上流の例外は 502)。
+- **許可リスト**: 中継は行き先を検査してから外へ出す。許可は JRA の公式サイトのホスト(https。認証情報・ポート指定なし)と、`https://www.cloudflare.com/cdn-cgi/trace`(GET だけ)だけ。ほかは外へ出さず 403、GET・POST 以外のメソッドは 405。リダイレクトは追わず(`redirect: "manual"`)そのまま返す。渡す要求のヘッダは content-type・user-agent・accept・accept-language だけ。応答の状態・本文は変えず、ヘッダも content-encoding と content-length 以外は変えずに返す(本文は Workers の fetch が展開済みのため)。中継の側でも、今の JRA の取得と同じ上限(`JRA_TIMEOUT_MS`)で切る(応答の待ちと本文の読み出しの合計。超えたら 504、上流の例外は 502)。
 - **戻し方**: `wrangler.toml` の `JRA_FETCH_VIA_PROXY` を "0" にして、承認印つきで公開する(直接の取得に戻る。未設定・"0"・"1" 以外は直接)。"1" でも binding が無い構成では、警告を 1 行出して直接取る。
 - **効くとき**: 中継の DO は公開後に初めて作られるので、apac の希望が効く(希望であって保証ではない。拠点は公開後に利用状況の API で確かめる)。smoke はすべての構成で `JRA_FETCH_VIA_PROXY=0` にして、本物の JRA・cloudflare に出ない。
 

@@ -87,7 +87,11 @@ export async function handleProxyRequest(request: Request, fetchFn: JraFetchLike
   };
   try {
     const upstream = await fetchFn(checked.url.toString(), init);
-    return new Response(withDeadline(upstream.body, init.signal as AbortSignal), { status: upstream.status, statusText: upstream.statusText, headers: upstream.headers });
+    // 本文は Workers の fetch が展開済みなので、content-encoding と content-length は落とす(残すと呼ぶ側が二重に展開・長さの食い違いを起こしうる)。ほかのヘッダはそのまま。
+    const outHeaders = new Headers(upstream.headers);
+    outHeaders.delete("content-encoding");
+    outHeaders.delete("content-length");
+    return new Response(withDeadline(upstream.body, init.signal as AbortSignal), { status: upstream.status, statusText: upstream.statusText, headers: outHeaders });
   } catch (error) {
     const name = error instanceof Error ? error.name : "";
     return denied(name === "TimeoutError" || name === "AbortError" ? 504 : 502, name === "TimeoutError" || name === "AbortError" ? "timeout" : "upstream");

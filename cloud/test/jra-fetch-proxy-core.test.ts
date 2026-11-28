@@ -124,6 +124,17 @@ describe("handleProxyRequest", () => {
     expect(calls[0]!.init.method).toBe("GET");
     expect(calls[0]!.init.body).toBeUndefined();
   });
+  it("応答から content-encoding と content-length を落とす(本文は展開済みの前提)。ほかのヘッダと本文は変えない", async () => {
+    const upstream = new Response("本文", { status: 200, headers: { "content-type": "text/html", server: "AkamaiGHost", "content-encoding": "gzip", "content-length": "999" } });
+    expect(upstream.headers.get("content-encoding")).toBe("gzip");
+    expect(upstream.headers.get("content-length")).toBe("999");
+    const res = await handleProxyRequest(new Request(JRA_CUSHION_URL), async () => upstream);
+    expect(res.headers.has("content-encoding")).toBe(false);
+    expect(res.headers.has("content-length")).toBe(false);
+    expect(res.headers.get("content-type")).toBe("text/html");
+    expect(res.headers.get("server")).toBe("AkamaiGHost");
+    expect(await res.text()).toBe("本文");
+  });
   it.each([403, 404, 500, 302])("上流の状態 %s をそのまま返す(302 も追わず、location も返す)", async (status) => {
     const calls: string[] = [];
     const res = await handleProxyRequest(new Request(JRA_CUSHION_URL), async (url) => {
