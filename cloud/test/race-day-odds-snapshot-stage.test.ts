@@ -44,10 +44,10 @@ const DUE10 = START - ODDS_SNAPSHOT_EARLY_LEAD_MS;
 const PAGES = ["tanpuku", "wakuren", "umaren", "wide", "umatan", "sanrenpuku", "sanrentan"];
 const DIGIT: Record<string, string> = { tanpuku: "1", wakuren: "3", umaren: "4", wide: "5", umatan: "6", sanrenpuku: "7", sanrentan: "8" };
 const cnameOf = (raceId: string, page: string): string => `pw15${DIGIT[page]}ouS3${raceId.slice(4, 6)}${raceId.slice(0, 4)}${raceId.slice(6, 8)}${raceId.slice(8, 10)}${raceId.slice(10, 12)}${DATE}Z/AA`;
-const linksOf = (raceId: string): JraOddsRaceLinks => ({
+const linksOf = (raceId: string, without: readonly string[] = []): JraOddsRaceLinks => ({
   raceId,
   race: raceId.slice(10, 12),
-  cnames: Object.fromEntries(PAGES.map((p) => [p, cnameOf(raceId, p)])) as unknown as JraOddsRaceLinks["cnames"],
+  cnames: Object.fromEntries(PAGES.filter((p) => !without.includes(p)).map((p) => [p, cnameOf(raceId, p)])) as unknown as JraOddsRaceLinks["cnames"],
 });
 const VENUE: JraOddsVenueLink = { venueCode: "05", year: "2026", kai: "05", day: "02", date: DATE, racesCname: `pw15orl000520260502${DATE}/AA` };
 
@@ -60,6 +60,8 @@ interface FakeJra extends JraOddsFetcher {
   /** 開催選択の結果(Issue #804)。null なら見本。 */
   venuesResult: () => JraOddsResult<JraOddsVenueLink[]> | null;
   throwOnOpen: boolean;
+  /** Issue #817: 発売の無い式別(枠連が無いレースのレース選択を再現する)。RACE のリンクからこの式別を外す。 */
+  notSold: string[];
 }
 function fakeJra(): FakeJra {
   const jra: FakeJra = {
@@ -69,6 +71,7 @@ function fakeJra(): FakeJra {
     oddsResult: () => null,
     venuesResult: () => null,
     throwOnOpen: false,
+    notSold: [],
     open(): JraOddsSession {
       jra.opens += 1;
       if (jra.throwOnOpen) throw new Error("secret https://example.invalid/x?cname=ABC");
@@ -84,7 +87,7 @@ function fakeJra(): FakeJra {
         },
         async listRaces() {
           sent += 1;
-          return { status: "ok", value: [linksOf(RACE), linksOf(RACE2)] };
+          return { status: "ok", value: [linksOf(RACE, jra.notSold), linksOf(RACE2)] };
         },
         async fetchOdds(cname: string) {
           sent += 1;
@@ -600,6 +603,42 @@ describe("馬連・枠連・ワイド・3連複の全組の記録(#751)", () => 
     expect(h.saved[0]).toMatchObject({ leadMin: 10, status: "ok" });
     expect(combosOf(h)).toEqual(ERR5);
     expect(h.jra.fetchOdds).toEqual([linksOf(RACE).cnames.tanpuku]);
+  });
+});
+
+describe("枠連が発売されないレース(8 頭以下。Issue #817)", () => {
+  it("5 分前: 枠連はリンクが無く、JRA に取りに行かない。単勝・複勝と、ほかの組合せは取れて ok。combos の枠連は {err:\"not-sold\"}(キーは残し、fetch-failed とは別の語)", async () => {
+    const h = harness(DUE + 3_000);
+    h.jra.notSold = ["wakuren"];
+    await registerAndRun(h);
+    const saved = h.saved[0]!;
+    expect(saved.status).toBe("ok");
+    expect(saved.horses).toHaveLength(14);
+    const c = saved.combos!;
+    expect(Object.keys(c)).toEqual(["umaren", "wakuren", "wide", "sanrenpuku", "umatan", "sanrentan"]); // 形は変えない(キーは 6 つのまま)
+    expect(c.wakuren).toEqual({ err: "not-sold" });
+    for (const k of ["umaren", "wide", "sanrenpuku", "umatan", "sanrentan"] as const) expect("err" in c[k]!, k).toBe(false);
+    expect(h.jra.fetchOdds).toHaveLength(6);
+    expect(h.jra.fetchOdds.some((x) => x.startsWith(`pw15${DIGIT.wakuren}`))).toBe(false);
+    expect(h.warns.join("\n")).not.toMatch(/wakuren/);
+    expect(parseOddsSnapshotPayload(rowOf(h, 5).payload_json!)).toEqual(saved); // DO に持った形も読み戻せる
+  });
+
+  it("10 分前も同じ(枠連 not-sold・頁 5 本)", async () => {
+    const h = harness(DUE10 + 3_000);
+    h.jra.notSold = ["wakuren"];
+    await registerAndRun(h);
+    expect(h.saved[0]!.status).toBe("ok");
+    expect(h.saved[0]!.combos!.wakuren).toEqual({ err: "not-sold" });
+    expect(h.jra.fetchOdds).toHaveLength(5);
+  });
+
+  it("単複が無いレース(リンクに tanpuku が無い)は今までどおり取れず failed(fetch-failed)", async () => {
+    const h = harness(DUE + 3_000);
+    h.jra.notSold = ["tanpuku"];
+    await registerAndRun(h);
+    expect(h.saved).toHaveLength(0);
+    expect(rowOf(h, 5).state).toBe("pending"); // 再試行待ち
   });
 });
 

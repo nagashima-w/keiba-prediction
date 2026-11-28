@@ -7,7 +7,7 @@ import { JRA_ODDS_PAGES, type JraOddsPage, type JraOddsRaceLinks } from "../../p
 import type { JraOddsFetcher, JraOddsSession } from "../src/jra-odds-fetch";
 import { jraLinksCacheKey, jraOddsCacheKey } from "../src/jra-odds-cache";
 import { jraOddsPagesFor, MemoryJraOddsStageStore } from "../src/race-day-jra-odds";
-import { JraOddsStage } from "../src/race-day-jra-odds-stage";
+import { JraOddsStage, linksMatch } from "../src/race-day-jra-odds-stage";
 
 /**
  * Issue #676: 締切の再計算が使う、メモリ上の進み具合({@link MemoryJraOddsStageStore})と、段の時間の守り(`stopAt`)・1 頁ずつの順序。
@@ -191,5 +191,60 @@ describe("JraOddsStage: 頁の失敗の語を構造的に渡す(onPageFailure。
     });
     await stage.run(RACE, 0, DATE);
     expect(warnings.filter((m) => m.includes("取得に失敗しました"))).toHaveLength(2); // 前提: 2 頁とも失敗し、警告が 2 件
+  });
+});
+
+describe("JraOddsStage: 発売の無い式別(枠連が無いレース。Issue #817)", () => {
+  const noWakuren: JraOddsRaceLinks = { ...links, cnames: Object.fromEntries(Object.entries(links.cnames).filter(([p]) => p !== "wakuren")) as unknown as JraOddsRaceLinks["cnames"] };
+
+  it("linksMatch: 枠連の cname が無くても有効(単複があれば)。単複が無ければ無効。ある式別は照合する", () => {
+    expect(linksMatch(noWakuren, RACE, DATE)).toBe(true);
+    expect(linksMatch(links, RACE, DATE)).toBe(true); // 7 式別の既存の形も読める
+    const noTanpuku = { ...links, cnames: Object.fromEntries(Object.entries(links.cnames).filter(([p]) => p !== "tanpuku")) };
+    expect(linksMatch(noTanpuku, RACE, DATE)).toBe(false);
+    expect(linksMatch({ ...links, cnames: { ...links.cnames, umaren: links.cnames.wide } }, RACE, DATE), "式別が合わない cname は無効").toBe(false);
+  });
+
+  it("枠連の頁は JRA に取りに行かず、ほかの 6 頁は取って置く。枠連は failed(netkeiba のまま)で、失敗の警告も通知(onPageFailure)も出さない", async () => {
+    const cache = new Map<string, { value: string; fetchedAt: number }>();
+    cache.set(jraLinksCacheKey(RACE), { value: JSON.stringify(noWakuren), fetchedAt: 0 });
+    const fetched: string[] = [];
+    const fetcher: JraOddsFetcher = {
+      open(): JraOddsSession {
+        return {
+          requestCount: 0,
+          async listVenues() {
+            throw new Error("リンクがあるので呼ばれない");
+          },
+          async listRaces() {
+            throw new Error("リンクがあるので呼ばれない");
+          },
+          async fetchOdds(c) {
+            const page = Object.keys(DIGIT).find((p) => c.startsWith(`pw15${DIGIT[p]}`))!;
+            fetched.push(page);
+            return { status: "ok", value: jraHtml(FIXTURE[page]!) };
+          },
+        };
+      },
+    };
+    const warnings: string[] = [];
+    const failures: unknown[] = [];
+    const store = new MemoryJraOddsStageStore(jraOddsPagesFor(true));
+    const stage = new JraOddsStage({
+      store,
+      fetcher,
+      cache: { get: (k) => cache.get(k), set: (k, v) => void cache.set(k, { value: v, fetchedAt: 1 }) },
+      now: () => 1,
+      onWarn: (m) => warnings.push(m),
+      onPageFailure: (f) => failures.push(f),
+    });
+    await stage.run(RACE, 0, DATE);
+    await stage.run(RACE, 0, DATE); // 三連単
+    expect(fetched).toEqual(["tanpuku", "umaren", "wide", "umatan", "sanrenpuku", "sanrentan"]);
+    expect(cache.has(jraOddsCacheKey(RACE, "wakuren"))).toBe(false);
+    for (const p of ["tanpuku", "umaren", "wide", "umatan", "sanrenpuku", "sanrentan"] as const) expect(cache.has(jraOddsCacheKey(RACE, p)), p).toBe(true);
+    expect(store.hasPending()).toBe(false);
+    expect(warnings.join("\n")).not.toMatch(/失敗/);
+    expect(failures).toEqual([]);
   });
 });

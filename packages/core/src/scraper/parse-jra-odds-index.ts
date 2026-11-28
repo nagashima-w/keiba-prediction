@@ -99,14 +99,21 @@ export function parseJraOddsVenueListPage(html: string, date: string): readonly 
 export interface JraOddsRaceLinks {
   readonly raceId: string;
   readonly race: string;
-  readonly cnames: Readonly<Record<JraOddsPage, string>>;
+  /**
+   * 式別ごとの cname。**単複(`tanpuku`)は必ずある**。ほかの式別は、頁に載っているものだけがある(Issue #817)。
+   * 枠連は 8 頭以下のレースで発売されず、頁の枠連の位置が空(`wakuren blank`)になる。無い式別は「発売なし」であって、取れなかったのではない。
+   */
+  readonly cnames: JraOddsRaceCnames;
 }
+
+/** 1 レースの式別ごとの cname(単複は必須、ほかは発売があるものだけ)。 */
+export type JraOddsRaceCnames = Readonly<Partial<Record<JraOddsPage, string>>> & { readonly tanpuku: string };
 
 const ODDS_CNAME_GLOBAL = /pw15[1345678]ou[A-Z0-9]{2}\d{2}\d{4}\d{2}\d{2}\d{2}\d{8}Z(?:99)?\/[0-9A-F]{2}/g;
 
 /**
  * レース選択の頁から、指定の場・日のレースごとの式別の cname を、R の順に返す。
- * 7 つの式別が揃わないレースは返さない(一部だけを使うと、取れない式別があるレースを呼び出し側が気づけない)。同じ式別が複数あれば先の 1 つ。
+ * 単複が無いレースは返さない(単複は分析の土台で、無ければ取れるオッズが無い)。ほかの式別は、あるものだけを持って返す(枠連は 8 頭以下で発売されない。Issue #817)。同じ式別が複数あれば先の 1 つ。
  * @param date 開催日 `YYYYMMDD`
  * @param venueCode 場コード 2 桁
  */
@@ -125,8 +132,8 @@ export function parseJraOddsRaceListPage(html: string, date: string, venueCode: 
   }
   const out: JraOddsRaceLinks[] = [];
   for (const [raceId, links] of [...byRace.entries()].sort(([a], [b]) => a.localeCompare(b))) {
-    if (JRA_ODDS_PAGES.every((p) => links[p] !== undefined)) {
-      out.push({ raceId, race: raceId.slice(10), cnames: links as Record<JraOddsPage, string> });
+    if (links.tanpuku !== undefined) {
+      out.push({ raceId, race: raceId.slice(10), cnames: links as JraOddsRaceCnames });
     }
   }
   return out;

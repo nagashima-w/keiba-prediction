@@ -100,7 +100,7 @@ describe("parseJraOddsRaceListPage(東京のレース選択)", () => {
     for (const race of races) {
       expect(Object.keys(race.cnames).sort()).toEqual([...JRA_ODDS_PAGES].sort());
       for (const page of JRA_ODDS_PAGES) {
-        const parsed = parseJraOddsCname(race.cnames[page]);
+        const parsed = parseJraOddsCname(race.cnames[page]!);
         expect(parsed?.page, `${race.raceId} ${page}`).toBe(page);
         expect(parsed?.raceId, `${race.raceId} ${page}`).toBe(race.raceId);
       }
@@ -119,10 +119,43 @@ describe("parseJraOddsRaceListPage(東京のレース選択)", () => {
     expect(parseJraOddsRaceListPage(html, "20261107", "05")).toEqual([]);
   });
 
-  it("式別が欠けたレースは返さない(7 つ揃わないレースの一部だけを使わない)", () => {
-    const broken = html.replace(/pw158ouS305202605020520261108Z\/[0-9A-F]{2}/g, "");
+  it("単複が無いレースは返さない(単複は必須。ほかの式別だけでは、どのレースかを選べても取れるオッズが無い)", () => {
+    const broken = html.replace(/pw151ouS305202605020520261108Z\/[0-9A-F]{2}/g, "");
     const got = parseJraOddsRaceListPage(broken, "20261108", "05");
     expect(got).toHaveLength(11);
     expect(got.some((r) => r.raceId === "202605050205")).toBe(false);
+  });
+
+  it("単複以外の式別が欠けたレースは、あるものだけを持って返す(落とさない。Issue #817)", () => {
+    const broken = html.replace(/pw158ouS305202605020520261108Z\/[0-9A-F]{2}/g, "");
+    const got = parseJraOddsRaceListPage(broken, "20261108", "05");
+    expect(got).toHaveLength(12);
+    const r5 = got.find((r) => r.raceId === "202605050205");
+    expect(r5).toBeDefined();
+    expect(Object.keys(r5!.cnames).sort()).toEqual(JRA_ODDS_PAGES.filter((p) => p !== "sanrentan").sort());
+    expect(r5!.cnames.sanrentan).toBeUndefined();
+  });
+});
+
+describe("parseJraOddsRaceListPage(枠連が発売されないレース。Issue #817。京都 11/28 のレース選択)", () => {
+  const html = loadShiftJisFixture("jra_odds_orl_kyoto_20261128.html");
+  const races = parseJraOddsRaceListPage(html, "20261128", "08");
+  const r4 = races.find((r) => r.raceId === "202608050704");
+
+  it("京都 4R(7 頭の障害。枠連の位置が wakuren blank)は返り、枠連の cname だけが無い", () => {
+    expect(r4).toBeDefined();
+    expect(Object.keys(r4!.cnames).sort()).toEqual(["sanrenpuku", "sanrentan", "tanpuku", "umaren", "umatan", "wide"]);
+    expect(r4!.cnames.wakuren).toBeUndefined();
+    for (const page of ["tanpuku", "umaren", "wide", "umatan", "sanrenpuku", "sanrentan"] as const) {
+      const parsed = parseJraOddsCname(r4!.cnames[page]!);
+      expect(parsed?.page, page).toBe(page);
+      expect(parsed?.raceId, page).toBe("202608050704");
+    }
+  });
+
+  it("枠連がある他のレースは 7 式別が揃ったまま(退化していない)", () => {
+    const withWakuren = races.filter((r) => r.cnames.wakuren !== undefined);
+    expect(withWakuren.length).toBeGreaterThan(0);
+    for (const r of withWakuren) expect(Object.keys(r.cnames)).toHaveLength(JRA_ODDS_PAGES.length);
   });
 });

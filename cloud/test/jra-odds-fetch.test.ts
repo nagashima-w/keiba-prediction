@@ -152,10 +152,13 @@ describe("失敗の分類(例外は投げない。文面・URL・本文は残さ
     expect(await h.session().listVenues("20261109")).toEqual({ status: "ok", value: [] });
   });
 
-  it("レース選択にそのレースの式別が揃わなければ shape-mismatch", async () => {
+  it("レース選択に、単複のあるレースが 1 つも無ければ shape-mismatch(式別が一部欠けるだけのレースは、あるものを返す。Issue #817)", async () => {
+    const venue = { venueCode: "05", year: "2026", kai: "05", day: "02", date: "20261108", racesCname: TOKYO_ORL };
     const h = harness(() => html(OLI));
-    const r = await h.session().listRaces({ venueCode: "05", year: "2026", kai: "05", day: "02", date: "20261108", racesCname: TOKYO_ORL });
-    expect(r).toEqual({ status: "shape-mismatch" });
+    expect(await h.session().listRaces(venue)).toMatchObject({ status: "ok" }); // 入口の頁は単複のリンクが 1 つだけある(前提)
+    const noTanpuku = new TextEncoder().encode(decode("jra_odds_orl_tokyo_20261108.html").replace(/pw151ou[A-Z0-9]+\/[0-9A-F]{2}/g, ""));
+    const h2 = harness(() => html(noTanpuku));
+    expect(await h2.session().listRaces(venue)).toEqual({ status: "shape-mismatch" });
   });
 });
 
@@ -293,6 +296,45 @@ describe("fetchJraRaceOdds(1 レースぶんの式別の頁。cname の拾い方
     const r = await fetchJraRaceOdds(h.session(), { date: "20261108", raceId: "2026", pages: ["tanpuku"] });
     expect(r.pages).toEqual({ tanpuku: { status: "shape-mismatch" } });
     expect(h.calls).toHaveLength(0);
+  });
+});
+
+describe("fetchJraRaceOdds(枠連が発売されないレース。Issue #817。京都 4R 11/28)", () => {
+  const KYOTO_ORL = decode("jra_odds_orl_kyoto_20261128.html");
+  const R4 = "202608050704";
+  const links = parseJraOddsRaceListPage(KYOTO_ORL, "20261128", "08").find((l) => l.raceId === R4)!;
+
+  it("枠連は JRA に取りに行かず not-sold。単複と馬連は取る(本数 2)。かわりに param-error を使わない", async () => {
+    const h = harness(() => html(TANPUKU));
+    const r = await fetchJraRaceOdds(h.session(), { date: "20261128", raceId: R4, pages: ["tanpuku", "wakuren", "umaren"], links });
+    expect(links.cnames.wakuren).toBeUndefined(); // 前提
+    expect(h.calls).toHaveLength(2);
+    expect(h.calls.some((c) => c.body?.startsWith("cname=pw153ou"))).toBe(false);
+    expect(r.pages.wakuren).toEqual({ status: "not-sold" });
+    expect(r.pages.tanpuku?.status).toBe("ok");
+    expect(r.pages.umaren?.status).toBe("ok");
+  });
+
+  it("discover でも、枠連の無いレースを見つけて単複が取れる(これまでは not-found で全頁が失敗)", async () => {
+    const calls: string[] = [];
+    const session: JraOddsSession = {
+      requestCount: 0,
+      async listVenues() {
+        return { status: "ok", value: [{ venueCode: "08", year: "2026", kai: "05", day: "07", date: "20261128", racesCname: "pw15orl00082026050720261128/AA" }] };
+      },
+      async listRaces() {
+        return { status: "ok", value: parseJraOddsRaceListPage(KYOTO_ORL, "20261128", "08") };
+      },
+      async fetchOdds(cname) {
+        calls.push(cname);
+        return { status: "ok", value: "x" };
+      },
+    };
+    const r = await fetchJraRaceOdds(session, { date: "20261128", raceId: R4, pages: ["tanpuku", "wakuren"] });
+    expect(r.links?.raceId).toBe(R4);
+    expect(r.pages.tanpuku?.status).toBe("ok");
+    expect(r.pages.wakuren).toEqual({ status: "not-sold" });
+    expect(calls).toEqual([links.cnames.tanpuku]);
   });
 });
 

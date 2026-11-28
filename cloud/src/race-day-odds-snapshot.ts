@@ -79,8 +79,11 @@ export type OddsSnapshotState = "pending" | "done" | "abandoned";
  */
 export type OddsSnapshotHorse = readonly [number, number | null, number | null, number | null, number | null, string | null];
 
-/** 組合せの頁が取れなかった理由(固定の語。既存の語から選ぶ。新しい語は作らない)。`fetch-failed` = 頁を取れなかった / `unavailable` = 表が読めない・全組が票数なし / `parse-error` = 読み取りの失敗。 */
-export type OddsSnapshotComboErr = "fetch-failed" | "unavailable" | "parse-error";
+/**
+ * 組合せの頁が取れなかった理由(固定の語)。`fetch-failed` = 頁を取れなかった / `unavailable` = 表が読めない・全組が票数なし / `parse-error` = 読み取りの失敗 /
+ * `not-sold` = そのレースにその券種の発売が無い(Issue #817。枠連は 8 頭以下で発売されず、JRA のレース選択の頁にリンクが無い。取りに行っていない。取れなかったのではないので、`fetch-failed` と区別する)。
+ */
+export type OddsSnapshotComboErr = "fetch-failed" | "unavailable" | "parse-error" | "not-sold";
 /** 組合せの 1 頁(馬連・枠連・3連複)。取れたとき = 取った時刻 t・頁の時刻 dt・頁の状態 st・組ごとの値 o(キーは小さい番号を先にした 2 桁連結。票数なしは null)。取れなかったとき = {err}。 */
 export type OddsSnapshotComboPage =
   | { readonly t: number; readonly dt: string | null; readonly st: string | null; readonly o: Readonly<Record<string, number | null>> }
@@ -218,7 +221,7 @@ const isPageWith = (v: unknown, valueOk: (x: unknown) => boolean): boolean => {
   }
   const page = v as Record<string, unknown>;
   if ("err" in page) {
-    return page.err === "fetch-failed" || page.err === "unavailable" || page.err === "parse-error";
+    return page.err === "fetch-failed" || page.err === "unavailable" || page.err === "parse-error" || page.err === "not-sold";
   }
   return (
     typeof page.t === "number" && Number.isFinite(page.t) && (page.dt === null || typeof page.dt === "string") && (page.st === null || typeof page.st === "string") &&

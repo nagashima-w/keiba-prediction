@@ -19,11 +19,11 @@
  */
 import { redactSecrets } from "./llm-run";
 import { buildFailDetail } from "./jra-fail-detail";
-import { createJraOddsOverride, jraOddsCacheKey } from "./jra-odds-cache";
+import { createJraOddsOverride, jraLinksCacheKey, jraOddsCacheKey } from "./jra-odds-cache";
 import type { JraOddsFetcher, JraOddsSession } from "./jra-odds-fetch";
 import type { OddsSnapshotSink } from "./odds-snapshot-repository";
 import { MemoryJraOddsStageStore } from "./race-day-jra-odds";
-import { JraOddsStage, type JraOddsPageFailure, type JraOddsStageCache } from "./race-day-jra-odds-stage";
+import { JraOddsStage, linksMatch, type JraOddsPageFailure, type JraOddsStageCache } from "./race-day-jra-odds-stage";
 import {
   comboPageOfCache,
   horsesOfSnapshot,
@@ -316,6 +316,9 @@ export class OddsSnapshotStage {
   ): Promise<P | { readonly err: OddsSnapshotComboErr }> {
     let err: OddsSnapshotComboErr = "fetch-failed";
     try {
+      if (this.isNotSold(row, page)) {
+        return { err: "not-sold" }; // 発売の無い券種(枠連が無いレースなど。Issue #817)。JRA に取りに行かない
+      }
       await this.runPage(fetcher, row, page, stopAt, this.onWarn, (failure) => {
         // 段が渡す失敗の語(構造化)から、読み取りの失敗だけを引き継ぐ。警告の文面は読まない(#756)。それ以外は fetch-failed のまま。
         if (failure.kind === "parse-failed" && (failure.word === "unavailable" || failure.word === "parse-error")) {
@@ -329,6 +332,20 @@ export class OddsSnapshotStage {
       return read(entry.value, entry.fetchedAt) ?? { err: "parse-error" };
     } catch {
       return { err: "fetch-failed" };
+    }
+  }
+
+  /**
+   * そのレースの式別の頁に発売が無いか(単勝・複勝の段が取得キャッシュに置いたレース選択のリンクに、その式別の cname が無い)。
+   * リンクが読めない・別のレースのものなら false(取りに行く。取れなければ fetch-failed のまま)。
+   */
+  private isNotSold(row: OddsSnapshotTaskRow, page: "umaren" | "wakuren" | "wide" | "sanrenpuku" | "umatan" | "sanrentan"): boolean {
+    try {
+      const entry = this.cache.get(jraLinksCacheKey(row.race_id));
+      const parsed: unknown = entry === undefined ? null : JSON.parse(entry.value);
+      return linksMatch(parsed, row.race_id, row.kaisai_date) && parsed.cnames[page] === undefined;
+    } catch {
+      return false;
     }
   }
 
