@@ -37,8 +37,11 @@ function isParamErrorPage(html: string): boolean {
   return title !== null && title[1]!.includes("パラメータエラー");
 }
 
-/** 1 本の失敗の語。上に、指定の場・レースが開催選択・レース選択に無かった `not-found` を足す。 */
-export type JraOddsFailure = JraPageFailure | "not-found";
+/**
+ * 1 本の失敗の語。上に、指定の場・レースが開催選択・レース選択に無かった `not-found` と、そのレースに発売の無い式別(枠連が無い 8 頭以下のレースなど。レース選択の頁にリンクが無い。
+ * JRA には取りに行かない。Issue #817)の `not-sold` を足す。
+ */
+export type JraOddsFailure = JraPageFailure | "not-found" | "not-sold";
 /** 失敗には、取得の失敗の詳細(種類と HTTP の状態。Issue #804)が付くことがある(通信の失敗・HTTP の失敗のとき。`param-error`・`shape-mismatch`・`not-found` には付かない)。語({@link JraOddsFailure})は変えない。 */
 export type JraOddsResult<T> = { readonly status: "ok"; readonly value: T } | { readonly status: JraOddsFailure; readonly failInfo?: JraFailInfo };
 
@@ -255,13 +258,19 @@ export async function fetchJraRaceOdds(session: JraOddsSession, request: FetchJr
     links = found.links;
   }
   for (const page of wanted) {
-    let result = await session.fetchOdds(links.cnames[page]);
+    const cname = links.cnames[page];
+    if (cname === undefined) {
+      out[page] = { status: "not-sold" }; // 発売の無い式別は、JRA に取りに行かない(Issue #817)
+      continue;
+    }
+    let result = await session.fetchOdds(cname);
     if (result.status === "param-error" && !rediscovered) {
       rediscovered = true;
       const found = await discover();
       if (found.status === "ok") {
         links = found.links;
-        result = await session.fetchOdds(links.cnames[page]);
+        const again = links.cnames[page];
+        result = again === undefined ? { status: "not-sold" } : await session.fetchOdds(again);
       } else {
         result = { status: found.status };
       }

@@ -66,8 +66,15 @@ export function linksMatch(value: unknown, raceId: string, date: string): value 
     return false;
   }
   const cnames = links.cnames as Record<string, unknown>;
+  // 単複は必須。ほかの式別は、発売があるものだけ(枠連が無いレース。Issue #817)。あるものは、レース・日付・式別が合うか照合する。
+  if (typeof cnames.tanpuku !== "string") {
+    return false;
+  }
   return JRA_ODDS_PAGES.every((page) => {
     const cname = cnames[page];
+    if (cname === undefined) {
+      return true; // 発売の無い式別(単複は上で確かめ済み)
+    }
     if (typeof cname !== "string") {
       return false;
     }
@@ -187,7 +194,14 @@ export class JraOddsStage {
           failed += rest;
           break;
         }
-        let result = await this.fetchAndStore(session, raceId, page, links.cnames[page], date);
+        const cnameNow = links.cnames[page];
+        if (cnameNow === undefined) {
+          // 発売の無い式別(枠連が無いレースなど。Issue #817)。JRA に取りに行かず、警告・通知も出さない(取れなかったのではない)。その券種は netkeiba のまま。
+          store.mark(raceId, instance, page, "failed");
+          failed += 1;
+          continue;
+        }
+        let result = await this.fetchAndStore(session, raceId, page, cnameNow, date);
         if (result.status === "fetch-failed" && result.word === "param-error" && !rediscovered) {
           rediscovered = true; // たどり直しは段全体で 1 回だけ
           const found = await discover();
@@ -195,7 +209,8 @@ export class JraOddsStage {
             result = found.failInfo === undefined ? { status: "fetch-failed", word: found.failure } : { status: "fetch-failed", word: found.failure, failInfo: found.failInfo };
           } else {
             links = found.links;
-            result = await this.fetchAndStore(session, raceId, page, links.cnames[page], date);
+            const again = links.cnames[page];
+            result = again === undefined ? { status: "fetch-failed", word: "not-sold" } : await this.fetchAndStore(session, raceId, page, again, date);
           }
         }
         if (result.status === "fetch-failed") {
