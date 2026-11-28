@@ -191,6 +191,8 @@ function vars(email: string, aud: string, adminUser?: string): string[] {
     "--var", "JRA_BABA_PAST_BACKFILL_ENABLED:0",
     // Issue #675: JRA のオッズを使わない(`JRA_ODDS_ENABLED=0`)。smoke(CI でも走る)が、中央の発走前の分析で本物の JRA に出ないことを保証する(取得口を DO に渡さない)。`scripts/test/cloud-config-guard.test.ts` が、vars() にこの指定があることを固定する。
     "--var", "JRA_ODDS_ENABLED:0",
+    // Issue #815: 中継を使わない(`JRA_FETCH_VIA_PROXY=0`)。本番の toml は "1" だが、smoke の開催日の DO が中継の DO 経由で本物の JRA・cloudflare に出ないことを保証する。
+    "--var", "JRA_FETCH_VIA_PROXY:0",
     "--var", `ACCESS_TEAM_NAME:${TEAM}`,
     "--var", `ACCESS_AUD:${aud}`,
     "--var", `ACCESS_ALLOWED_EMAIL:${email}`,
@@ -301,7 +303,7 @@ async function main(): Promise<void> {
   try {
     // A. 設定なし。
     // Issue #676: 設定なしの構成にも JRA を使わない指定を付ける(今は DO に届かず JRA に出る経路が無いが、将来この構成から DO に届くようになっても、本物の JRA に出ない)。
-    await runConfig("A", BASE_PORT, ["--var", "JRA_ODDS_ENABLED:0"], async () => {
+    await runConfig("A", BASE_PORT, ["--var", "JRA_ODDS_ENABLED:0", "--var", "JRA_FETCH_VIA_PROXY:0"], async () => {
       await expectAllForbidden(BASE_PORT, "A(設定なし)");
     });
 

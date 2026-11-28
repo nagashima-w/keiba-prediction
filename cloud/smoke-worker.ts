@@ -375,6 +375,7 @@ export { RaceMarketEdgeDO } from "./src/market-edge-do";
 export { JraHorseBackfillDO } from "./src/jra-horse-backfill-do";
 export { JraBlinkerBackfillDO } from "./src/jra-blinker-backfill-do";
 export { JraBabaPastBackfillDO } from "./src/jra-baba-past-backfill-do";
+export { JraFetchProxy } from "./src/jra-fetch-proxy-do";
 
 /**
  * Issue #590: 過去の結果の毎晩の変換を、workerd の実環境(本物の DO の SQLite・アラーム・D1・R2・変換)で最後まで通すための **smoke 専用の DO**(smoke の一時設定だけが binding `RACE_ARCHIVE_RUNS_SMOKE` で指す。

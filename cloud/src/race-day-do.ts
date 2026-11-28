@@ -22,6 +22,7 @@ import { D1TrainerNamesStore } from "./trainer-names-repository";
 import { D1OddsSnapshotStore } from "./odds-snapshot-repository";
 import { createJraEntriesFetcher } from "./jra-entries-fetch";
 import { fetchTraceColo } from "./jra-colo";
+import { JRA_FETCH_PROXY_NAME, resolveJraFetch, type ProxyStubLike } from "./jra-fetch-proxy-core";
 import { createJraFetchers } from "./jra-fetchers";
 import { isJraOddsDisabled } from "./race-day-jra-odds";
 import { D1JraEntriesStore } from "./jra-entries-repository";
@@ -78,6 +79,16 @@ export interface RaceDayEnv {
    */
   JRA_ODDS_ENABLED?: string;
   /**
+   * JRA への取得(馬場・発走前のオッズ・拠点の確認)を中継の DO(`JRA_FETCH_PROXY`)経由にするか(Worker の var。Issue #815。`wrangler.toml` の [vars])。**文字列 `"1"` のときだけ**中継を使う。
+   * 未設定・`"0"`・それ以外は今までどおり直接 fetch する。`"1"` でも binding が無い構成では直接 fetch する(警告 1 行)。判定は {@link isJraFetchViaProxy}。
+   */
+  JRA_FETCH_VIA_PROXY?: string;
+  /** JRA への取得の中継の DO(`JraFetchProxy`。Issue #815)。単一インスタンス(固定名 `JRA_FETCH_PROXY_NAME`)。 */
+  JRA_FETCH_PROXY?: {
+    idFromName(name: string): any;
+    get(id: any, options?: DoGetOptions): ProxyStubLike;
+  };
+  /**
    * 別の Worker(service binding。Issue #796)。分析・オッズの記録を保存した後に、計算を頼む(`createModelHook`。応答は見ない。失敗は警告 1 行で握る)。
    * **無い構成では何もしない**。wrangler.toml にはまだ足していない(相手の Worker が先にデプロイされてから別に足す)。
    */
@@ -123,7 +134,15 @@ export class RaceDay extends DurableObject<RaceDayEnv> {
             }
           };
     // JRA の取得口(馬場・オッズ)。同じ間隔の部品を共有する(Issue #680)。var JRA_ODDS_ENABLED が "0" のときはオッズを渡さない(今までの動き)。
-    const jraFetchers = createJraFetchers({ oddsEnabled: !isJraOddsDisabled(env.JRA_ODDS_ENABLED) });
+    // 開催日の DO の JRA への取得(馬場・オッズ・拠点の確認)の fetch。var JRA_FETCH_VIA_PROXY が "1" なら、アジア太平洋の中継の DO 経由(Issue #815)。間隔・タイムアウト・分類はここ(開催日の DO)で動く。
+    const jraFetch = resolveJraFetch({
+      viaProxyVar: env.JRA_FETCH_VIA_PROXY,
+      namespace: env.JRA_FETCH_PROXY,
+      makeStub: (ns) => doStub(ns, JRA_FETCH_PROXY_NAME),
+      direct: (target, init) => fetch(target, init),
+      warn: (message) => console.warn(message),
+    }).fetch;
+    const jraFetchers = createJraFetchers({ oddsEnabled: !isJraOddsDisabled(env.JRA_ODDS_ENABLED), fetch: jraFetch });
     const modelHook = createModelHook(env.MODEL, (message) => console.warn(message));
     this.core = new RaceDayCore({
       sql: ctx.storage.sql,
@@ -157,7 +176,7 @@ export class RaceDay extends DurableObject<RaceDayEnv> {
       // 馬場の取得(Issue #294。Issue #478 で取得先を JRA のページに替えた)。secret は要らない(JRA のページは素の fetch で届く〈#488〉)。URL は取得口の中にだけあり、core には渡らない。保存先は D1(baba_fetches・baba_conditions〈migration 0017〉)。
       fetchBaba: jraFetchers.fetchBaba,
       // Cloudflare の拠点(Issue #804)。JRA の取得の失敗の詳細に付ける。cdn-cgi/trace を 1 日 1 回、その日の最初の JRA の取得の前に取る(JRA には出ない。取れなくても取得は止めない)。「その日の最初の取得のときの拠点」。
-      fetchColo: () => fetchTraceColo((target, init) => fetch(target, init)),
+      fetchColo: () => fetchTraceColo(jraFetch),
       babaStore: new D1BabaStore({ db: env.DB }),
       // 貯めた当日の馬場の値の読み出し(Issue #295)。発走前の分析が、そのレースの開催日 × 場コードの 1 行を D1 から読む(表が無い間は読み出しが失敗して値なしで続ける)。
       babaReader: new D1BabaStore({ db: env.DB }),
